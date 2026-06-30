@@ -1,0 +1,32 @@
+# Claude Code local settings
+.claude/settings.local.json
+
+# Secrets / environment
+.env
+.env.*
+*.secret
+*secret*
+*token*
+secrets/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+
+# Node
+node_modules/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Local data / model caches
+data/
+*.sqlite
+models/
+.cache/
