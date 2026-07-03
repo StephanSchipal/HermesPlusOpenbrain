@@ -3,13 +3,19 @@
 **Date:** 2026-06-30
 **Author:** Stephan (with Claude Code, brainstorming session)
 **Status:** Approved design — ready for implementation planning
+**Revised:** 2026-07-03 — reviewed against the canonical OB1 repo; reinforced the build-vs-reuse
+rationale and added fingerprint dedup, `delete`/`update` MCP tools, and an Auto-Capture skill reference.
 
 ---
 
 ## 1. Goal
 
-Add an [OpenBrain](https://github.com/RadixSeven/OpenBrain)-style, self-owned, agent-readable
-**secondary memory** to an existing, working **Hermes-Agent** deployment.
+Add an OpenBrain-style, self-owned, agent-readable **secondary memory** to an existing,
+working **Hermes-Agent** deployment. OpenBrain references: the canonical
+[OB1 repo](https://github.com/NateBJones-Projects/OB1) (Nate Jones) and the
+[RadixSeven fork](https://github.com/RadixSeven/OpenBrain). We reuse OB1's *primitives and
+ideas* (Postgres + pgvector, semantic capture, fingerprint dedup, a few MCP tools) but not its
+deployment (see §3).
 
 Concretely: information the user sends from **YouTube, Substack, and similar sources** via
 **WhatsApp** should be **analyzed, summarized, reduced to around 5 keywords, and stored** in a
@@ -38,10 +44,16 @@ Hermes-Agent's own built-in memory (`MEMORY.md` / `USER.md` / Honcho user modeli
 | Hosting | **Self-host on the Hostinger VPS** (Docker, next to Hermes + Traefik) | Maximum ownership, no external account, data sits beside Hermes. |
 | Capture interface | **WhatsApp → Hermes** (not Slack) | Already works; Hermes has an LLM and MCP support. Slack/Supabase-edge path from the article is unnecessary. |
 | Summarization + keywords | **Done by Hermes' own LLM** | Hermes already analyzes messages; avoids a second LLM dependency. |
-| Build vs. reuse | **Lean custom MCP server** | RadixSeven fork is Supabase/edge-function bound; bending it is more work than a small purpose-built service. |
+| Build vs. reuse | **Lean custom MCP server** | OB1's only deployment paths are **Supabase** (the SaaS middleman we're avoiding) or **Kubernetes** (too heavy for an 8 GB VPS already running Hermes + Traefik). Its gateway/MCP pieces are Supabase-edge-function-flavored. A small purpose-built Docker service is simpler to run and reason about while reusing OB1's primitives (pgvector, dedup, tool set). |
 | Embeddings | **Local multilingual model on the VPS** (`multilingual-e5-small`) | No external API; handles the user's German + English mix; fits comfortably in 8 GB. |
 | Retrieval scope (v1) | **WhatsApp + laptop (Claude Desktop / Claude Code)** | The "every AI plugs into one brain" payoff; requires authenticated remote MCP access. |
 | Remote access | **Traefik subdomain + TLS + bearer token** | Traefik already runs and manages Let's Encrypt; minimal new surface. |
+
+**Relationship to OB1:** we deliberately diverge from OB1's stack while keeping its good ideas.
+OB1's base table is `thoughts`; ours is `captures` (purpose-built for this capture use case) — a
+conscious divergence, not accidental. OB1 also ships importers (ChatGPT, Obsidian, X, Gmail,
+Perplexity, …) and "skill packs" (e.g. **Auto-Capture**); we borrow the Auto-Capture idea for the
+Hermes capture instruction (§4.1 D) and note the importers as a future migration option (§7).
 
 ## 4. Architecture
 
@@ -56,8 +68,8 @@ Hermes-Agent's own built-in memory (`MEMORY.md` / `USER.md` / Honcho user modeli
    │         │ WhatsApp                    ┌────────────────┐         │
    │         │                             │ openbrain-mcp  │         │
    │         │                             │  - e5-small    │         │
-   │         │                             │  - save/search │         │
-   │         │                             │  - bearer auth │         │
+   │         │                             │  - 6 MCP tools │         │
+   │         │                             │  - dedup+auth  │         │
    │         │                             └───────┬────────┘         │
    │   ┌─────┴───────┐                             │ SQL              │
    │   │  traefik    │  TLS @ brain.<vps-domain>   ▼                  │
@@ -88,7 +100,7 @@ Hermes-Agent's own built-in memory (`MEMORY.md` / `USER.md` / Honcho user modeli
 **B. `openbrain-mcp` (Python service)** — the only piece we write.
 - Loads the embedding model **`intfloat/multilingual-e5-small`** in-process at startup
   (384-dim vectors; uses `query:` / `passage:` prefixes per the model's convention).
-- Exposes an **MCP server over Streamable HTTP** with four tools (section 4.3).
+- Exposes an **MCP server over Streamable HTTP** with six tools (section 4.3).
 - Generates embeddings, reads/writes Postgres, returns structured results.
 - Authenticates every request via a **bearer token** (`OPENBRAIN_TOKEN`).
 - Stateless except for the model; all persistence is in `openbrain-db`.
@@ -100,9 +112,10 @@ Hermes-Agent's own built-in memory (`MEMORY.md` / `USER.md` / Honcho user modeli
 
 **D. Hermes-Agent (existing, configured)**
 - Add an **MCP server entry** pointing to `openbrain-mcp` on the internal network.
-- Add a **capture instruction/skill**: when the user sends content/links, Hermes
-  fetches/uses the content, summarizes it, extracts around 5 keywords, and calls
-  `openbrain.save(...)`, then confirms back on WhatsApp.
+- Add a **capture instruction/skill** (based on OB1's **Auto-Capture** skill pack as a
+  starting template): when the user sends content/links, Hermes fetches/uses the content,
+  summarizes it, extracts around 5 keywords, and calls `openbrain.save(...)`, then confirms
+  back on WhatsApp.
 
 **E. Laptop clients (existing)**
 - Claude Desktop and Claude Code each get an MCP entry pointing at
@@ -122,21 +135,32 @@ Table `captures`:
 | `source_url` | `text` null | original link if available |
 | `lang` | `text` null | detected/declared language |
 | `metadata` | `jsonb` | extensible (people, topics, action items, etc.) |
+| `fingerprint` | `text` unique | dedup key: SHA-256 of the normalized `source_url` (else of `raw_text`) |
 | `embedding` | `vector(384)` | embedding of `summary` (+ keywords) |
 | `created_at` | `timestamptz` | default `now()` |
+| `updated_at` | `timestamptz` | default `now()`; bumped by `update` |
 
 - Index: `ivfflat` (or `hnsw`) on `embedding` using cosine distance.
+- Index: unique on `fingerprint` (enables dedup / idempotent capture; borrowed from OB1's
+  "fingerprint dedup" recipe).
 - We embed the **summary** (concise, meaning-dense). Raw text is retained for reference and
   future re-embedding (e.g. if upgrading to `bge-m3`).
 
 ### 4.3 MCP tools
 
 1. **`save`** — `{ raw_text, summary, keywords[~5], source, source_url?, lang?, metadata? }`
-   → embeds summary, inserts row, returns `{ id, stored: true }`.
+   → computes `fingerprint`; if a row with that fingerprint exists, returns the existing
+   `{ id, deduped: true }` **without** re-embedding; otherwise embeds summary, inserts row,
+   returns `{ id, stored: true }`. (Idempotent — resending the same link is a no-op.)
 2. **`search`** — `{ query, k? (default 5) }`
    → embeds query, returns top-k by cosine similarity with summary, keywords, source, score.
 3. **`list_recent`** — `{ n? (default 10) }` → most recently captured items.
 4. **`stats`** — total count, counts by source, date range, top keywords.
+5. **`delete`** — `{ id }` → removes the capture with that id; returns `{ id, deleted: bool }`.
+   (Prune mis-captures; borrowed from OB1's `delete-thought-mcp`.)
+6. **`update`** — `{ id, summary?, keywords?, metadata? }` → updates the given fields,
+   re-embeds if `summary` changed, bumps `updated_at`; returns `{ id, updated: true }`.
+   (Borrowed from OB1's `update-thought-mcp`.)
 
 ## 5. End-to-end flows
 
@@ -144,8 +168,10 @@ Table `captures`:
 1. User sends a YouTube/Substack link (or text) to Hermes via WhatsApp.
 2. Hermes obtains the content (see open question 8.1), summarizes it, and extracts keywords.
 3. Hermes calls `openbrain.save` with raw text, summary, keywords, source, url.
-4. `openbrain-mcp` embeds the summary and stores the row in `openbrain-db`.
-5. Hermes replies on WhatsApp confirming what was captured (title/summary + keywords).
+4. `openbrain-mcp` computes the fingerprint; if it's a duplicate it returns the existing id
+   (`deduped`), otherwise it embeds the summary and stores the row in `openbrain-db`.
+5. Hermes replies on WhatsApp confirming what was captured (title/summary + keywords), or that
+   the item was already stored.
 
 ### 5.2 Retrieval — laptop
 1. In Claude Desktop or Claude Code, user asks a question.
@@ -173,7 +199,10 @@ Table `captures`:
 - No web dashboard / visualization UI.
 - No automated daily digest or weekly-review automation (can be added later via the same MCP).
 - No multi-user support — single owner.
-- No migration of existing notes (can be done later with a one-off `save` script).
+- No migration of existing notes for v1. Later options: a one-off `save` script, or adapt one of
+  OB1's importers (ChatGPT, Obsidian, X, Gmail, Perplexity, …) to write into `captures`.
+- No schema-aware LLM routing / multiple metadata schemas (OB1 has this; we keep a single
+  `captures` table with a flexible `metadata` jsonb instead).
 
 ## 8. Open questions / risks to resolve during planning
 
@@ -197,13 +226,17 @@ Table `captures`:
 - A semantic query from Claude Desktop **and** Claude Code returns the relevant capture even
   when the query wording differs from the stored text (incl. across German/English).
 - The same query asked through WhatsApp/Hermes returns the same capture.
+- Sending the **same link twice** does not create a duplicate row (fingerprint dedup); the
+  second `save` reports `deduped`.
 - `openbrain-db` data survives a container restart.
 - No component depends on an external paid SaaS; ongoing cost ≈ €0.
 
 ## 10. Implementation outline (to be expanded into a plan)
 
-1. Provision `openbrain-db` (Postgres 16 + pgvector) container + volume; create schema + index.
-2. Build `openbrain-mcp` service (model load, embed, 4 MCP tools, bearer auth); Dockerfile.
+1. Provision `openbrain-db` (Postgres 16 + pgvector) container + volume; create schema
+   (incl. unique `fingerprint`) + indexes.
+2. Build `openbrain-mcp` service (model load, embed, fingerprint dedup, 6 MCP tools —
+   save/search/list_recent/stats/delete/update, bearer auth); Dockerfile.
 3. Compose both into the existing Docker environment; verify internal connectivity.
 4. Add Traefik router + TLS for `brain.<vps>`; verify HTTPS + token from laptop.
 5. Register `openbrain-mcp` as an MCP server in Hermes; add the capture instruction/skill.
