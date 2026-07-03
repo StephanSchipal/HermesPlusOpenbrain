@@ -19,6 +19,7 @@ This request to Claude is done on my Windows laptop with Claude Desktop and Clau
 
 Resources: 
 Github: 
+	Openbrain repo by Nate Jones: https://github.com/NateBJones-Projects/OB1?shem=rimspwouoe,
 	Openbrain repo (repo derived from Nate Jones original): https://github.com/RadixSeven/OpenBrain
 	Hermes-Agent repo: https://github.com/nousresearch/hermes-agent
 Internet: 
