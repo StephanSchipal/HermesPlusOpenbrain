@@ -4,7 +4,9 @@
 
 **Goal:** Stand up a self-hosted, OpenBrain-style semantic memory (Postgres + pgvector + a small MCP server) on the existing Hostinger VPS, so content sent to Hermes-Agent via WhatsApp is summarized, keyworded, and stored — then searchable by meaning from WhatsApp and from the laptop (Claude Desktop / Claude Code).
 
-**Architecture:** Two new Docker containers (`openbrain-db` = Postgres 16 + pgvector; `openbrain-mcp` = Python MCP service with in-process multilingual embeddings) join the existing `hermes-agent` + `traefik` stack. Hermes does the LLM summarization/keywording and calls the MCP `save` tool over the internal Docker network. Traefik exposes the MCP server over HTTPS (bearer-token auth) for laptop clients.
+**Architecture:** Two new Docker containers (`openbrain-db` = Postgres 16 + pgvector; `openbrain-mcp` = Python MCP service with in-process multilingual embeddings) join the existing `hermes-agent` + `traefik` stack. Hermes does the LLM summarization/keywording and calls the MCP `save` tool over the internal Docker network. Saves are deduped by a content fingerprint. The server exposes six MCP tools (`save`, `search`, `list_recent`, `stats`, `delete`, `update`). Traefik exposes the MCP server over HTTPS (bearer-token auth) for laptop clients.
+
+**Revised 2026-07-03:** aligned with the spec revision — added fingerprint dedup, the `delete`/`update` tools, and an Auto-Capture skill reference (from OB1).
 
 **Tech Stack:** Docker Compose, Postgres 16, `pgvector`, Python 3.11, official MCP SDK (`mcp.server.fastmcp.FastMCP`) over Streamable HTTP, Starlette/uvicorn, `sentence-transformers` (`intfloat/multilingual-e5-small`), `psycopg` 3 + `pgvector`, Traefik.
 
@@ -25,14 +27,16 @@ openbrain-mcp/
     config.py          # env-var loading (DATABASE_URL, OPENBRAIN_TOKEN, model name)
     embeddings.py      # load model once; embed_passage / embed_query (e5 prefixes)
     keywords.py        # normalize_keywords ("around 5", dedupe, trim)
+    fingerprint.py     # content_fingerprint() — SHA-256 of normalized url/text (dedup key)
     db.py              # get_conn() context manager + pgvector registration
-    store.py           # save_capture / search_captures / fetch_recent / compute_stats
-    server.py          # FastMCP tools + bearer-auth Starlette app + /health
+    store.py           # save/search/fetch_recent/compute_stats/delete/update + dedup
+    server.py          # FastMCP tools (6) + bearer-auth Starlette app + /health
   migrations/
-    001_init.sql       # vector extension, captures table, indexes
+    001_init.sql       # vector extension, captures table (incl. fingerprint), indexes
   tests/
     test_keywords.py   # pure unit tests (no DB)
-    test_store.py      # integration round-trip (needs a Postgres)
+    test_fingerprint.py# pure unit tests (no DB)
+    test_store.py      # integration round-trip incl. dedup/delete/update (needs a Postgres)
   Dockerfile
   pyproject.toml
   README.md
@@ -130,8 +134,10 @@ CREATE TABLE IF NOT EXISTS captures (
     source_url  text,
     lang        text,
     metadata    jsonb       NOT NULL DEFAULT '{}',
+    fingerprint text        NOT NULL,
     embedding   vector(384) NOT NULL,
-    created_at  timestamptz NOT NULL DEFAULT now()
+    created_at  timestamptz NOT NULL DEFAULT now(),
+    updated_at  timestamptz NOT NULL DEFAULT now()
 );
 
 -- Cosine-distance ANN index for semantic search
@@ -141,6 +147,10 @@ CREATE INDEX IF NOT EXISTS captures_embedding_idx
 -- Fast "recent" listing
 CREATE INDEX IF NOT EXISTS captures_created_at_idx
     ON captures (created_at DESC);
+
+-- Dedup key: one row per fingerprint (idempotent capture)
+CREATE UNIQUE INDEX IF NOT EXISTS captures_fingerprint_idx
+    ON captures (fingerprint);
 ```
 Note: Postgres 16 provides `gen_random_uuid()` in core; the `vector` type comes from the `pgvector` image used in Task 3.
 
@@ -148,7 +158,7 @@ Note: Postgres 16 provides `gen_random_uuid()` in core; the `vector` type comes 
 
 ```bash
 git add openbrain-mcp/migrations/001_init.sql
-git commit -m "feat(db): add captures schema with pgvector cosine index"
+git commit -m "feat(db): add captures schema with pgvector cosine index + fingerprint dedup"
 ```
 
 ---
@@ -280,6 +290,80 @@ git add openbrain-mcp/app/keywords.py openbrain-mcp/tests/test_keywords.py
 git commit -m "feat(keywords): normalize to ~5 deduped keywords"
 ```
 
+### Task 2.1b: Content fingerprint (dedup key)
+
+**Files:**
+- Create: `openbrain-mcp/app/fingerprint.py`
+- Test: `openbrain-mcp/tests/test_fingerprint.py`
+
+- [ ] **Step 1: Write the failing test** **[repo]**
+
+```python
+# tests/test_fingerprint.py
+from app.fingerprint import content_fingerprint
+
+def test_same_url_same_fingerprint_regardless_of_case_or_trailing_slash():
+    a = content_fingerprint(source_url="https://YouTube.com/watch?v=abc/", raw_text="x")
+    b = content_fingerprint(source_url="https://youtube.com/watch?v=abc", raw_text="y")
+    assert a == b  # url normalized; raw_text ignored when url present
+
+def test_falls_back_to_raw_text_when_no_url():
+    a = content_fingerprint(source_url=None, raw_text="  Hello World  ")
+    b = content_fingerprint(source_url=None, raw_text="hello world")
+    assert a == b  # text normalized (trim + lowercase + collapse spaces)
+
+def test_different_content_differs():
+    a = content_fingerprint(source_url=None, raw_text="note one")
+    b = content_fingerprint(source_url=None, raw_text="note two")
+    assert a != b
+
+def test_is_hex_sha256():
+    fp = content_fingerprint(source_url=None, raw_text="anything")
+    assert len(fp) == 64 and all(c in "0123456789abcdef" for c in fp)
+```
+
+- [ ] **Step 2: Run test to verify it fails** **[repo]**
+
+Run: `cd openbrain-mcp && python -m pytest tests/test_fingerprint.py -v`
+Expected: FAIL — `ModuleNotFoundError: No module named 'app.fingerprint'`.
+
+- [ ] **Step 3: Write minimal implementation** **[repo]**
+
+```python
+# app/fingerprint.py
+import hashlib
+import re
+
+def _normalize_url(url: str) -> str:
+    u = url.strip().lower()
+    u = re.sub(r"^https?://", "", u)      # scheme-agnostic
+    u = u.rstrip("/")                      # ignore trailing slash
+    return u
+
+def _normalize_text(text: str) -> str:
+    return re.sub(r"\s+", " ", (text or "").strip().lower())
+
+def content_fingerprint(*, source_url: str | None, raw_text: str) -> str:
+    """Stable dedup key. Prefer the normalized URL; fall back to normalized text.
+
+    Same link (or same text) -> same fingerprint -> deduped on save.
+    """
+    basis = _normalize_url(source_url) if source_url else _normalize_text(raw_text)
+    return hashlib.sha256(basis.encode("utf-8")).hexdigest()
+```
+
+- [ ] **Step 4: Run test to verify it passes** **[repo]**
+
+Run: `cd openbrain-mcp && python -m pytest tests/test_fingerprint.py -v`
+Expected: PASS (4 tests).
+
+- [ ] **Step 5: Commit** **[repo]**
+
+```bash
+git add openbrain-mcp/app/fingerprint.py openbrain-mcp/tests/test_fingerprint.py
+git commit -m "feat(fingerprint): content fingerprint for dedup"
+```
+
 ### Task 2.2: Embeddings (e5 prefixes)
 
 **Files:**
@@ -357,7 +441,7 @@ git add openbrain-mcp/app/db.py
 git commit -m "feat(db): connection helper with pgvector registration"
 ```
 
-### Task 2.4: Store layer — save / search / recent / stats
+### Task 2.4: Store layer — save (dedup) / search / recent / stats / delete / update
 
 **Files:**
 - Create: `openbrain-mcp/app/store.py`
@@ -417,6 +501,41 @@ def test_fetch_recent_and_stats():
     assert len(recent) == 2
     assert s["total"] == 2
     assert s["by_source"]["youtube"] == 2
+
+def test_saving_same_url_twice_is_deduped():
+    _clean()
+    url = "https://youtube.com/watch?v=xyz"
+    with get_conn() as conn:
+        r1 = store.save_capture(conn, raw_text="t1", summary="a talk about memory systems",
+                                keywords=["memory"], source="youtube", source_url=url)
+        r2 = store.save_capture(conn, raw_text="t1 again", summary="same talk resent",
+                                keywords=["memory"], source="youtube", source_url=url)
+    assert r1["stored"] is True and r1["deduped"] is False
+    assert r2["deduped"] is True and r2["id"] == r1["id"]
+    with get_conn() as conn:
+        assert store.compute_stats(conn)["total"] == 1  # only one row
+
+def test_delete_removes_row():
+    _clean()
+    with get_conn() as conn:
+        r = store.save_capture(conn, raw_text="z", summary="note to delete",
+                               keywords=["tmp"], source="other")
+        assert store.delete_capture(conn, capture_id=r["id"]) is True
+        assert store.delete_capture(conn, capture_id=r["id"]) is False  # already gone
+        assert store.compute_stats(conn)["total"] == 0
+
+def test_update_changes_summary_and_reembeds():
+    _clean()
+    with get_conn() as conn:
+        r = store.save_capture(conn, raw_text="w", summary="old summary about cooking",
+                               keywords=["cooking"], source="other")
+        ok = store.update_capture(conn, capture_id=r["id"],
+                                  summary="new summary about astrophysics",
+                                  keywords=["space", "physics"])
+    assert ok is True
+    with get_conn() as conn:
+        hits = store.search_captures(conn, query="notes about the universe and stars", k=1)
+    assert hits and hits[0]["id"] == r["id"]  # re-embedding took effect
 ```
 
 - [ ] **Step 2: Run test to verify it fails** **[repo]**
@@ -432,26 +551,46 @@ import psycopg
 from psycopg.types.json import Json
 from app.keywords import normalize_keywords
 from app.embeddings import embed_passage, embed_query
+from app.fingerprint import content_fingerprint
 
 def save_capture(conn: psycopg.Connection, *, raw_text: str, summary: str,
                  keywords: list[str], source: str | None = None,
                  source_url: str | None = None, lang: str | None = None,
-                 metadata: dict | None = None) -> str:
+                 metadata: dict | None = None) -> dict:
+    """Insert a capture, or return the existing one if the fingerprint matches (dedup).
+
+    Returns {"id", "stored": bool, "deduped": bool}. When deduped, no embedding is computed.
+    """
+    fp = content_fingerprint(source_url=source_url, raw_text=raw_text)
+    with conn.cursor() as cur:
+        cur.execute("SELECT id FROM captures WHERE fingerprint = %s", (fp,))
+        existing = cur.fetchone()
+    if existing:
+        return {"id": str(existing[0]), "stored": False, "deduped": True}
+
     kws = normalize_keywords(keywords)
     emb = embed_passage(summary)
     with conn.cursor() as cur:
         cur.execute(
             """
             INSERT INTO captures
-                (raw_text, summary, keywords, source, source_url, lang, metadata, embedding)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                (raw_text, summary, keywords, source, source_url, lang, metadata,
+                 fingerprint, embedding)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (fingerprint) DO NOTHING
             RETURNING id
             """,
-            (raw_text, summary, kws, source, source_url, lang, Json(metadata or {}), emb),
+            (raw_text, summary, kws, source, source_url, lang, Json(metadata or {}), fp, emb),
         )
-        new_id = cur.fetchone()[0]
+        row = cur.fetchone()
+        if row is None:  # lost an insert race on the same fingerprint
+            cur.execute("SELECT id FROM captures WHERE fingerprint = %s", (fp,))
+            row = cur.fetchone()
+            conn.commit()
+            return {"id": str(row[0]), "stored": False, "deduped": True}
+        new_id = row[0]
     conn.commit()
-    return str(new_id)
+    return {"id": str(new_id), "stored": True, "deduped": False}
 
 def search_captures(conn: psycopg.Connection, *, query: str, k: int = 5) -> list[dict]:
     emb = embed_query(query)
@@ -500,6 +639,39 @@ def compute_stats(conn: psycopg.Connection) -> dict:
         "last_capture": last.isoformat() if last else None,
     }
 
+def delete_capture(conn: psycopg.Connection, *, capture_id: str) -> bool:
+    with conn.cursor() as cur:
+        cur.execute("DELETE FROM captures WHERE id = %s", (capture_id,))
+        deleted = cur.rowcount > 0
+    conn.commit()
+    return deleted
+
+def update_capture(conn: psycopg.Connection, *, capture_id: str,
+                   summary: str | None = None, keywords: list[str] | None = None,
+                   metadata: dict | None = None) -> bool:
+    """Update given fields; re-embed when summary changes; bump updated_at."""
+    sets: list[str] = []
+    params: list = []
+    if summary is not None:
+        sets += ["summary = %s", "embedding = %s"]
+        params += [summary, embed_passage(summary)]
+    if keywords is not None:
+        sets.append("keywords = %s")
+        params.append(normalize_keywords(keywords))
+    if metadata is not None:
+        sets.append("metadata = %s")
+        params.append(Json(metadata))
+    if not sets:
+        return False
+    sets.append("updated_at = now()")
+    params.append(capture_id)
+    # Column fragments are static literals; values are parameterized -> injection-safe.
+    with conn.cursor() as cur:
+        cur.execute(f"UPDATE captures SET {', '.join(sets)} WHERE id = %s", params)
+        updated = cur.rowcount > 0
+    conn.commit()
+    return updated
+
 def _row_to_result(r) -> dict:
     return {
         "id": str(r[0]),
@@ -516,13 +688,13 @@ def _row_to_result(r) -> dict:
 - [ ] **Step 4: Run tests to verify they pass** **[repo, needs DATABASE_URL]**
 
 Run: `cd openbrain-mcp && python -m pytest tests/test_store.py -v`
-Expected: PASS (2 tests). Requires the DB from Task 3.1–3.3 to be up and `DATABASE_URL` exported.
+Expected: PASS (6 tests). Requires the DB from Task 3.1–3.3 to be up and `DATABASE_URL` exported.
 
 - [ ] **Step 5: Commit** **[repo]**
 
 ```bash
 git add openbrain-mcp/app/store.py openbrain-mcp/tests/test_store.py
-git commit -m "feat(store): save/search/recent/stats over pgvector"
+git commit -m "feat(store): save (dedup)/search/recent/stats/delete/update over pgvector"
 ```
 
 ### Task 2.5: MCP server + bearer auth + health
@@ -552,13 +724,13 @@ def save(raw_text: str, summary: str, keywords: list[str],
          source: str | None = None, source_url: str | None = None,
          lang: str | None = None) -> dict:
     """Store a captured note. The summary is embedded for semantic search.
-    Pass the original text as raw_text, a concise summary, and ~5 keywords."""
+    Pass the original text as raw_text, a concise summary, and ~5 keywords.
+    Idempotent: resending the same link/text returns the existing id (deduped)."""
     with get_conn() as conn:
-        new_id = store.save_capture(
+        return store.save_capture(
             conn, raw_text=raw_text, summary=summary, keywords=keywords,
             source=source, source_url=source_url, lang=lang,
         )
-    return {"id": new_id, "stored": True}
 
 @mcp.tool()
 def search(query: str, k: int = 5) -> list[dict]:
@@ -577,6 +749,19 @@ def stats() -> dict:
     """Summary statistics: total captures, counts by source, date range."""
     with get_conn() as conn:
         return store.compute_stats(conn)
+
+@mcp.tool()
+def delete(id: str) -> dict:
+    """Delete a capture by id (prune mis-captures)."""
+    with get_conn() as conn:
+        return {"id": id, "deleted": store.delete_capture(conn, capture_id=id)}
+
+@mcp.tool()
+def update(id: str, summary: str | None = None, keywords: list[str] | None = None) -> dict:
+    """Edit a capture: change its summary and/or keywords (re-embeds if summary changes)."""
+    with get_conn() as conn:
+        return {"id": id, "updated": store.update_capture(
+            conn, capture_id=id, summary=summary, keywords=keywords)}
 
 class BearerAuthMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
@@ -855,17 +1040,19 @@ Restart/reload Hermes, then:
 ```bash
 docker exec -it $(docker ps --filter name=hermes --format '{{.Names}}' | head -1) hermes tools | grep -i openbrain
 ```
-Expected: `save`, `search`, `list_recent`, `stats` appear (names may be prefixed, e.g. `openbrain.save`).
+Expected: `save`, `search`, `list_recent`, `stats`, `delete`, `update` appear (names may be prefixed, e.g. `openbrain.save`).
 
 ### Task 5.2: Add the capture instruction/skill to Hermes
 
 **[VPS]** This tells Hermes what to do when you send content. Use the outcome of Task 0.1.
 
+Starting template: OB1's **Auto-Capture** skill pack (`/skills` in https://github.com/NateBJones-Projects/OB1) is a plain-text prompt pack for exactly this "notice content → capture it" behavior. Skim it and adapt its wording to the directive below (our tool is named `save`, not OB1's; keep it short).
+
 - [ ] **Step 1: Add a capture directive to Hermes' instructions/memory**
 
 Add to Hermes' system instruction (or a Hermes skill) text equivalent to:
 
-> When I send you a link or content from YouTube, Substack, or a similar source: (1) retrieve/read the content, (2) write a concise summary, (3) extract around 5 keywords, (4) call the `openbrain` `save` tool with `raw_text` = the source text (or my message if you cannot fetch it), `summary`, `keywords`, `source` (youtube/substack/other), and `source_url` if present. Then reply confirming the summary and keywords you stored. When I ask you to recall or find something I saved, use the `openbrain` `search` tool and answer from the results.
+> When I send you a link or content from YouTube, Substack, or a similar source: (1) retrieve/read the content, (2) write a concise summary, (3) extract around 5 keywords, (4) call the `openbrain` `save` tool with `raw_text` = the source text (or my message if you cannot fetch it), `summary`, `keywords`, `source` (youtube/substack/other), and `source_url` if present. Then reply confirming the summary and keywords you stored — and if the reply says `deduped`, tell me it was already saved. When I ask you to recall or find something I saved, use the `openbrain` `search` tool and answer from the results.
 
 If Task 0.1 found Hermes cannot fetch links, change (1) to: "use the text I paste."
 
@@ -956,7 +1143,15 @@ From **Claude Desktop** and **Claude Code**, run a semantically-worded query (di
 
 Ask Hermes the same query; it returns the same capture.
 
-- [ ] **Step 4: Persistence**
+- [ ] **Step 4: Dedup**
+
+Send the **same link again** via WhatsApp. Expected: Hermes replies that it was already saved, and the row count does not increase:
+```bash
+docker exec -it $(docker ps --filter name=openbrain-db --format '{{.Names}}') \
+  psql -U openbrain -d openbrain -c "SELECT count(*) FROM captures WHERE source_url IS NOT NULL;"
+```
+
+- [ ] **Step 5: Persistence**
 
 ```bash
 docker compose -f deploy/docker-compose.openbrain.yml restart openbrain-db
@@ -966,11 +1161,11 @@ docker exec -it $(docker ps --filter name=openbrain-db --format '{{.Names}}') \
 ```
 Expected: count unchanged after restart (volume persisted).
 
-- [ ] **Step 5: Cost/ownership check**
+- [ ] **Step 6: Cost/ownership check**
 
 Confirm no external paid SaaS is in the path (embeddings local, DB local). Done.
 
-- [ ] **Step 6: Final commit / tag**
+- [ ] **Step 7: Final commit / tag**
 
 ```bash
 git commit -am "docs: mark plan complete" || echo "nothing to commit"
@@ -981,6 +1176,6 @@ git tag v0.1.0 && git push --tags
 
 ## Self-review notes (author)
 
-- **Spec coverage:** Hosting/self-host (Phase 3–4), capture via WhatsApp+Hermes (Phase 5), summarize+~5 keywords by Hermes (Task 5.2), lean custom MCP server (Phase 2), local multilingual embeddings (Task 2.2), retrieval from WhatsApp + laptop (Phases 5–6), Traefik TLS + bearer token (Phase 4), data model (Task 1.1/2.4), all four MCP tools (Task 2.5), security model (Task 2.5 auth + Task 4), success criteria (Phase 7). Open questions §8 → Phase 0.
-- **Type consistency:** tool `list_recent`/`stats` delegate to store `fetch_recent`/`compute_stats` (renamed to avoid shadowing); `save_capture`/`search_captures` signatures match their call sites; result dicts share `_row_to_result`. Vector param passed as Python list works because `register_vector` is called on every connection.
-- **Known follow-ups (not blockers):** connection-per-request is fine for personal volume (add pooling later); HNSW index is created empty and fills as rows insert; consider a read-only token for laptop vs write token for Hermes (spec §6 optional hardening).
+- **Spec coverage:** Hosting/self-host (Phase 3–4), capture via WhatsApp+Hermes (Phase 5), summarize+~5 keywords by Hermes (Task 5.2), lean custom MCP server (Phase 2), local multilingual embeddings (Task 2.2), retrieval from WhatsApp + laptop (Phases 5–6), Traefik TLS + bearer token (Phase 4), data model incl. `fingerprint`/`updated_at` (Task 1.1/2.4), all **six** MCP tools — save/search/list_recent/stats/delete/update (Task 2.5), fingerprint dedup (Task 2.1b + save_capture + Phase 7 Step 4), Auto-Capture skill reference (Task 5.2), security model (Task 2.5 auth + Task 4), success criteria (Phase 7). Open questions §8 → Phase 0.
+- **Type consistency:** tool `list_recent`/`stats`/`delete`/`update` delegate to store `fetch_recent`/`compute_stats`/`delete_capture`/`update_capture` (renamed to avoid shadowing); `save_capture` now returns a dict `{id, stored, deduped}` and the `save` tool returns it verbatim — the two store tests that ignore the return value are unaffected; `content_fingerprint(source_url=, raw_text=)` keyword signature matches its one call site in `save_capture`; result dicts share `_row_to_result`. Vector param passed as Python list works because `register_vector` is called on every connection.
+- **Known follow-ups (not blockers):** connection-per-request is fine for personal volume (add pooling later); HNSW index is created empty and fills as rows insert; consider a read-only token for laptop vs write token for Hermes (spec §6 optional hardening); `update` intentionally does not recompute `fingerprint` (dedup keys off original source, which is correct).
