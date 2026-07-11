@@ -206,18 +206,28 @@ Table `captures`:
 
 ## 8. Open questions / risks to resolve during planning
 
-1. **Content fetching:** Does Hermes have a tool to fetch a YouTube transcript / Substack
-   article body from a link? If yes, capture is fully hands-off. If no, fallback options:
-   (a) add/enable a fetch tool in Hermes, or (b) user pastes the text. **To verify first.**
+1. ✅ **Content fetching — RESOLVED (2026-07-03):** Hermes can fetch both hands-off. YouTube via
+   a dedicated transcript skill (standard links, `youtu.be`, Shorts, embeds, raw video IDs,
+   multi-language fallback). Substack via a general web-fetch tool. No pasting required; capture
+   flow uses links directly as originally drafted.
 2. **MCP transport compatibility:** Confirm Hermes' MCP client and Claude Desktop/Code all
    support Streamable HTTP with a bearer header (else fall back to SSE or an SSH tunnel for
-   the laptop).
-3. **VPS domain for `brain.` subdomain:** confirm DNS control for a subdomain under
-   `srv1608402.hstgr.cloud` (or use an existing owned domain) so Traefik can issue TLS.
+   the laptop). *Still to verify — deferred to deployment (Phase 4/6 of the plan).*
+3. ✅ **VPS domain for `brain.` subdomain — RESOLVED (2026-07-03):** `*.srv1608402.hstgr.cloud`
+   is a wildcard already pointing at the VPS (`getent hosts` confirmed
+   `brain.srv1608402.hstgr.cloud` resolves to the same IP as the existing Hermes subdomain).
+   `OPENBRAIN_HOST = brain.srv1608402.hstgr.cloud`; no DNS provider changes needed.
 4. **Embedding prefixes:** ensure `save` uses `passage:` and `search` uses `query:` prefixes
    required by the e5 family for correct similarity.
 5. **Resource check at deploy:** confirm headroom with Hermes running (target: model +
    Postgres comfortably under total 8 GB).
+6. ✅ **Networking — RESOLVED (2026-07-03, discovered during Phase 0):** Traefik runs in
+   `network_mode: host`, not on a shared bridge network — it reaches containers via host-level
+   routing to their bridge IP, so it needs no network changes to front `openbrain-mcp`.
+   `openbrain-mcp` joins Hermes' existing `hermes-agent-7qpk_default` network (external) for
+   internal calls; `openbrain-db` stays on its own `openbrain_internal` network, unreachable
+   from Hermes — enforcing §6's isolation requirement at the network layer. See the
+   implementation plan's Phase 0 for full detail.
 
 ## 9. Success criteria
 

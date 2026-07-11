@@ -6,7 +6,9 @@
 
 **Architecture:** Two new Docker containers (`openbrain-db` = Postgres 16 + pgvector; `openbrain-mcp` = Python MCP service with in-process multilingual embeddings) join the existing `hermes-agent` + `traefik` stack. Hermes does the LLM summarization/keywording and calls the MCP `save` tool over the internal Docker network. Saves are deduped by a content fingerprint. The server exposes six MCP tools (`save`, `search`, `list_recent`, `stats`, `delete`, `update`). Traefik exposes the MCP server over HTTPS (bearer-token auth) for laptop clients.
 
-**Revised 2026-07-03:** aligned with the spec revision — added fingerprint dedup, the `delete`/`update` tools, and an Auto-Capture skill reference (from OB1).
+**Revised 2026-07-03 (a):** aligned with the spec revision — added fingerprint dedup, the `delete`/`update` tools, and an Auto-Capture skill reference (from OB1).
+
+**Revised 2026-07-03 (b):** Phase 0 completed on the live VPS. All placeholders resolved — see the "Resolved values" table at the top of Phase 0. Notably, Traefik runs in `network_mode: host` (not on a shared bridge network), which simplified the network design to two networks: `openbrain_internal` (db ↔ mcp only) and the existing `hermes-agent-7qpk_default` (mcp ↔ Hermes only) — `openbrain-db` is now structurally unreachable from Hermes, not just unreachable by convention.
 
 **Tech Stack:** Docker Compose, Postgres 16, `pgvector`, Python 3.11, official MCP SDK (`mcp.server.fastmcp.FastMCP`) over Streamable HTTP, Starlette/uvicorn, `sentence-transformers` (`intfloat/multilingual-e5-small`), `psycopg` 3 + `pgvector`, Traefik.
 
@@ -49,66 +51,90 @@ The existing `hermes-agent` and `traefik` projects are configured in place on th
 
 ---
 
-## Phase 0 — Verify prerequisites on the VPS (resolve spec §8 open questions)
+## Phase 0 — Verify prerequisites on the VPS (resolve spec §8 open questions) — ✅ DONE (2026-07-03)
 
 These tasks gather facts that change later steps. **Do them first.** No code is written here; record answers in `deploy/.env.example` comments or a scratch note.
 
-### Task 0.1: Confirm Hermes can fetch link content (spec §8.1)
+**Resolved values (from the live VPS session on 2026-07-03) — used throughout Phases 3–6:**
 
-**[VPS]** This decides whether capture is hands-off (send a link) or requires pasting text.
+| Placeholder | Resolved value |
+|---|---|
+| `OPENBRAIN_HOST` | `brain.srv1608402.hstgr.cloud` |
+| Traefik entrypoint | `websecure` |
+| Traefik certresolver | `letsencrypt` |
+| Network Hermes ↔ `openbrain-mcp` share | `hermes-agent-7qpk_default` (external, already exists — created by Hermes' own compose project) |
+| `openbrain-db` network | new `openbrain_internal` (created by our compose; **not** shared with Hermes — matches spec §6's "db never reachable by Hermes") |
+| Traefik network membership | **none needed** — Traefik runs with `network_mode: host` (its only network is `host`), so it already reaches container bridge IPs directly. This is *why* it can front Hermes today without being a member of `hermes-agent-7qpk_default`; the same applies to `openbrain-mcp`. |
+| Deploy workflow | `docker compose` on the VPS terminal (Hostinger Docker Manager "Terminal" button gives shell access; used directly, not the Compose UI) |
 
-- [ ] **Step 1: List Hermes' enabled tools**
+Container names for reference: `hermes-agent-7qpk-hermes-agent-1` (Hermes), `traefik-traefik-1` (Traefik).
 
-On the VPS terminal (or via the Hermes CLI inside its container):
+### Task 0.1: Confirm Hermes can fetch link content (spec §8.1) — ✅ RESOLVED
+
+**Outcome: Hermes can fetch both sources hands-off. No fallback needed.**
+- **YouTube:** dedicated transcript skill (handles standard links, `youtu.be`, Shorts, embeds, raw video IDs; multi-language with fallback chain; can output summary, chapters, thread, blog post, or quotes).
+- **Substack:** general web-fetch tool already reads article bodies.
+
+→ Capture flow uses links directly, exactly as drafted in Task 5.2 — no instruction changes needed.
+
+<details><summary>Original verification steps (for reference)</summary>
+
+- [x] **Step 1: List Hermes' enabled tools**
 ```bash
 docker exec -it $(docker ps --filter name=hermes --format '{{.Names}}' | head -1) hermes tools
 ```
-Expected: a list of 40+ tools. Look for a web-fetch / URL-reader / browser / YouTube-transcript tool.
+- [x] **Step 2: Live test via WhatsApp** — sent a YouTube link and a Substack link; both fetched and summarized correctly.
+- [x] **Step 3: Record the outcome** — see above.
+</details>
 
-- [ ] **Step 2: Live test via WhatsApp**
+### Task 0.2: Confirm DNS / subdomain for Traefik TLS (spec §8.3) — ✅ RESOLVED
 
-Send Hermes a WhatsApp message: *"Fetch this and give me a 3-sentence summary: <a YouTube link> and <a Substack link>"*.
-Expected: Hermes returns a real summary (proves it can retrieve the content).
-
-- [ ] **Step 3: Record the outcome**
-
-- If it can fetch → capture flow uses links directly (Task 5.2 instruction stays as written).
-- If it **cannot** fetch a YouTube transcript → choose a fallback and note it: (a) enable/add a fetch or transcript MCP/tool in Hermes, or (b) the user pastes text into WhatsApp. Adjust Task 5.2 wording accordingly.
-
-### Task 0.2: Confirm DNS / subdomain for Traefik TLS (spec §8.3)
-
-**[VPS]** Traefik needs a hostname it can get a Let's Encrypt cert for.
-
-- [ ] **Step 1: Determine an available hostname**
-
-Check what hostname the existing Hermes service uses in Traefik (gives the working domain pattern):
+**Outcome: zero manual DNS work needed.** Hermes' Traefik label showed the pattern
+`Host(\`hermes-agent-7qpk.srv1608402.hstgr.cloud\`)` — a subdomain of the VPS's own Hostinger
+hostname. Verified `*.srv1608402.hstgr.cloud` is a **wildcard** already pointing at the VPS:
 ```bash
-docker inspect $(docker ps --filter name=traefik --format '{{.Names}}' | head -1) >/dev/null 2>&1 && \
-docker ps --format '{{.Names}}' && \
-grep -ri "Host(" /path/to/traefik/dynamic 2>/dev/null || echo "inspect compose labels of hermes instead"
+$ getent hosts hermes-agent-7qpk.srv1608402.hstgr.cloud
+2a02:4780:79:5f9b::1 hermes-agent-7qpk.srv1608402.hstgr.cloud
+$ getent hosts brain.srv1608402.hstgr.cloud
+2a02:4780:79:5f9b::1 brain.srv1608402.hstgr.cloud
 ```
-- [ ] **Step 2: Pick `brain.<domain>`**
+Same IP for both → `brain.srv1608402.hstgr.cloud` already resolves to the VPS. Traefik's existing
+`letsencrypt` resolver will issue a cert for it the same way it did for Hermes, with no DNS
+provider changes required.
 
-Decide the OpenBrain hostname (e.g. `brain.<your-domain>` or a subdomain of the working Hermes domain). Confirm a DNS A record points it at the VPS public IP (create one if needed in your DNS provider / Hostinger DNS). Record the chosen hostname as `OPENBRAIN_HOST` for Task 4.
-
-### Task 0.3: Confirm how the existing stack is networked & managed
-
-**[VPS]** Later tasks attach `openbrain-*` to the same network as Hermes and reuse Traefik.
-
-- [ ] **Step 1: Find the Docker network and Traefik entrypoints**
+### Task 0.3: Confirm how the existing stack is networked & managed — ✅ RESOLVED
 
 ```bash
-docker network ls
-docker inspect $(docker ps --filter name=traefik --format '{{.Names}}' | head -1) \
-  --format '{{json .NetworkSettings.Networks}}'
-docker inspect $(docker ps --filter name=hermes --format '{{.Names}}' | head -1) \
-  --format '{{json .NetworkSettings.Networks}}'
+$ docker network ls
+NETWORK ID     NAME                        DRIVER    SCOPE
+f2dc072c4c0f   bridge                      bridge    local
+33f65483fc2c   hermes-agent-7qpk_default   bridge    local
+989f932f0121   host                        host      local
+800c3d88a8ab   none                        null      local
+
+$ docker inspect <traefik> --format '{{json .NetworkSettings.Networks}}'
+{"host": {...}}                              # Traefik's ONLY network is "host"
+
+$ docker inspect <hermes> --format '{{json .NetworkSettings.Networks}}'
+{"hermes-agent-7qpk_default": {"Aliases": ["hermes-agent-7qpk-hermes-agent-1", "hermes-agent"], "IPAddress": "172.16.1.2", ...}}
 ```
-Expected: identify the shared network name (e.g. `web` or `traefik`) and the Traefik HTTPS entrypoint name (commonly `websecure`) and certresolver name. Record these — they fill the compose labels in Task 4.
 
-- [ ] **Step 2: Confirm compose workflow**
+**Interpretation:** Traefik runs in `network_mode: host`, not on a shared bridge network — it
+reaches Hermes purely via host-level routing to the bridge network's IP (Docker bridge networks
+are host-routable). This means:
+1. **Traefik needs no network changes** to front `openbrain-mcp` — same mechanism that already
+   works for Hermes.
+2. **`openbrain-mcp` must join `hermes-agent-7qpk_default`** (not the reverse) so Hermes can call
+   it by container name over the internal network. Docker Compose automatically gives a service a
+   network alias equal to its service name on any network it joins, regardless of which compose
+   project defined that network — so `openbrain-mcp:8080` will resolve from inside Hermes' container.
+3. **`openbrain-db` stays off `hermes-agent-7qpk_default` entirely**, on its own
+   `openbrain_internal` network shared only with `openbrain-mcp`. This is a deliberate
+   improvement over the plan's original single-shared-network draft: it enforces spec §6's
+   "openbrain-db is never reachable by Hermes, only by openbrain-mcp" at the network layer, not
+   just by convention.
 
-Note whether you deploy via the Hostinger Docker Manager "Compose" UI or `docker compose` on the terminal. Either works; Task 3/4 assume `docker compose -f deploy/docker-compose.openbrain.yml up -d`.
+Compose workflow confirmed: terminal `docker compose`, not the Docker Manager Compose UI.
 
 ---
 
@@ -841,8 +867,8 @@ CMD ["python", "-m", "app.server"]
 ````markdown
 # openbrain-mcp
 
-Self-hosted MCP server for OpenBrain memory. Tools: `save`, `search`, `list_recent`, `stats`.
-Embeds with `intfloat/multilingual-e5-small`; stores in Postgres + pgvector.
+Self-hosted MCP server for OpenBrain memory. Tools: `save`, `search`, `list_recent`, `stats`,
+`delete`, `update`. Embeds with `intfloat/multilingual-e5-small`; stores in Postgres + pgvector.
 
 Env: `DATABASE_URL`, `OPENBRAIN_TOKEN`, optional `OPENBRAIN_MODEL`.
 Run: `python -m app.server` (serves MCP at `/mcp`, health at `/health`, port 8080).
@@ -860,7 +886,10 @@ git commit -m "build: Dockerfile for openbrain-mcp with prebaked model"
 **Files:**
 - Create: `deploy/docker-compose.openbrain.yml`, `deploy/.env.example`
 
-Use the shared network and Traefik settings discovered in Task 0.3. Replace `REPLACE_NETWORK`, `REPLACE_ENTRYPOINT`, `REPLACE_CERTRESOLVER`, and `OPENBRAIN_HOST` with the recorded values.
+Uses the values resolved in Phase 0: entrypoint `websecure`, certresolver `letsencrypt`,
+Hermes-shared network `hermes-agent-7qpk_default` (external, joined only by `openbrain-mcp`),
+and a new `openbrain_internal` network (joined by both services, not shared with Hermes) — see
+the Phase 0 "Resolved values" table for the full rationale.
 
 - [ ] **Step 1: Write `deploy/.env.example`** **[repo]**
 
@@ -868,7 +897,7 @@ Use the shared network and Traefik settings discovered in Task 0.3. Replace `REP
 # Copy to deploy/.env on the VPS and fill in. Do NOT commit the real .env.
 POSTGRES_PASSWORD=change-me-long-random
 OPENBRAIN_TOKEN=change-me-long-random
-OPENBRAIN_HOST=brain.example.com
+OPENBRAIN_HOST=brain.srv1608402.hstgr.cloud
 # DATABASE_URL is constructed inside compose from POSTGRES_PASSWORD; shown here for local test:
 # DATABASE_URL=postgresql://openbrain:change-me-long-random@localhost:5432/openbrain
 ```
@@ -887,7 +916,7 @@ services:
     volumes:
       - openbrain_pgdata:/var/lib/postgresql/data
       - ../openbrain-mcp/migrations/001_init.sql:/docker-entrypoint-initdb.d/001_init.sql:ro
-    networks: [REPLACE_NETWORK]
+    networks: [openbrain_internal]   # NOT on hermes-agent-7qpk_default — never reachable by Hermes
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U openbrain -d openbrain"]
       interval: 10s
@@ -902,13 +931,17 @@ services:
     depends_on:
       openbrain-db:
         condition: service_healthy
-    networks: [REPLACE_NETWORK]
+    networks:
+      - openbrain_internal   # talks to openbrain-db
+      - hermes_net           # reachable by Hermes as `openbrain-mcp:8080`
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.openbrain.rule=Host(`${OPENBRAIN_HOST}`)"
-      - "traefik.http.routers.openbrain.entrypoints=REPLACE_ENTRYPOINT"
-      - "traefik.http.routers.openbrain.tls.certresolver=REPLACE_CERTRESOLVER"
+      - "traefik.http.routers.openbrain.entrypoints=websecure"
+      - "traefik.http.routers.openbrain.tls.certresolver=letsencrypt"
       - "traefik.http.services.openbrain.loadbalancer.server.port=8080"
+      # No Traefik network membership needed: Traefik runs with network_mode: host
+      # and already reaches container bridge IPs directly (confirmed in Task 0.3).
     healthcheck:
       test: ["CMD-SHELL", "python -c \"import urllib.request;urllib.request.urlopen('http://localhost:8080/health')\""]
       interval: 30s
@@ -919,8 +952,11 @@ volumes:
   openbrain_pgdata:
 
 networks:
-  REPLACE_NETWORK:
+  openbrain_internal:
+    driver: bridge
+  hermes_net:
     external: true
+    name: hermes-agent-7qpk_default
 ```
 
 - [ ] **Step 3: Commit** **[repo]**
@@ -994,7 +1030,7 @@ Expected: both `openbrain-db` and `openbrain-mcp` `healthy`. (First build downlo
 - [ ] **Step 2: Verify internal health and auth**
 
 ```bash
-NET=REPLACE_NETWORK
+NET=hermes-agent-7qpk_default
 docker run --rm --network $NET curlimages/curl -s http://openbrain-mcp:8080/health   # {"ok":true}
 docker run --rm --network $NET curlimages/curl -s -o /dev/null -w "%{http_code}\n" http://openbrain-mcp:8080/mcp   # 401
 ```
@@ -1013,7 +1049,10 @@ curl -s https://$HOST/health                                  # {"ok":true}
 curl -s -o /dev/null -w "%{http_code}\n" https://$HOST/mcp    # 401 without token
 curl -s -o /dev/null -w "%{http_code}\n" -H "Authorization: Bearer $TOKEN" https://$HOST/mcp   # not 401
 ```
-Expected: valid Let's Encrypt cert (no TLS warning), `/health` ok, `/mcp` gated by token. If the cert is missing, recheck the DNS A record (Task 0.2) and Traefik entrypoint/certresolver names (Task 0.3).
+Expected: valid Let's Encrypt cert (no TLS warning), `/health` ok, `/mcp` gated by token. DNS
+needs no changes (`brain.srv1608402.hstgr.cloud` already resolves via the wildcard confirmed in
+Task 0.2) — if the cert is still missing, recheck the Traefik labels against Task 0.3's resolved
+entrypoint/certresolver names.
 
 ---
 
@@ -1029,10 +1068,9 @@ Point Hermes at the **internal** address (no TLS hop needed inside Docker). In H
 - URL: `http://openbrain-mcp:8080/mcp`
 - Header: `Authorization: Bearer <OPENBRAIN_TOKEN>`
 
-Ensure the `hermes-agent` container shares `REPLACE_NETWORK` (from Task 0.3); if not, attach it:
-```bash
-docker network connect REPLACE_NETWORK $(docker ps --filter name=hermes --format '{{.Names}}' | head -1)
-```
+No `docker network connect` needed on Hermes' side: `openbrain-mcp` already joins Hermes' own
+`hermes-agent-7qpk_default` network (declared as `hermes_net` in the compose file, Task 3.2), so
+Docker's embedded DNS resolves `openbrain-mcp` from inside the Hermes container out of the box.
 
 - [ ] **Step 2: Verify Hermes sees the tools**
 
@@ -1061,7 +1099,7 @@ If Task 0.1 found Hermes cannot fetch links, change (1) to: "use the text I past
 Send a YouTube or Substack link (or text) to Hermes on WhatsApp.
 Expected: within seconds, a reply confirming a stored summary + ~5 keywords. Verify storage:
 ```bash
-docker run --rm --network REPLACE_NETWORK -e TOKEN=$TOKEN curlimages/curl -s \
+docker run --rm --network hermes-agent-7qpk_default -e TOKEN=$TOKEN curlimages/curl -s \
   -H "Authorization: Bearer $TOKEN" http://openbrain-mcp:8080/mcp >/dev/null
 # Simpler check: query the DB count
 docker exec -it $(docker ps --filter name=openbrain-db --format '{{.Names}}') \
