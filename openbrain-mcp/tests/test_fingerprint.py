@@ -19,3 +19,18 @@ def test_different_content_differs():
 def test_is_hex_sha256():
     fp = content_fingerprint(source_url=None, raw_text="anything")
     assert len(fp) == 64 and all(c in "0123456789abcdef" for c in fp)
+
+def test_strips_known_tracking_params():
+    a = content_fingerprint(source_url="https://youtu.be/abc123?si=XYZ789", raw_text="x")
+    b = content_fingerprint(source_url="https://youtu.be/abc123", raw_text="y")
+    assert a == b  # YouTube share links append a per-share ?si= token
+
+def test_strips_www_prefix():
+    a = content_fingerprint(source_url="https://www.youtube.com/watch?v=abc", raw_text="x")
+    b = content_fingerprint(source_url="https://youtube.com/watch?v=abc", raw_text="y")
+    assert a == b
+
+def test_different_urls_still_differ_after_normalization():
+    a = content_fingerprint(source_url="https://youtu.be/abc123?si=XYZ789", raw_text="x")
+    b = content_fingerprint(source_url="https://youtu.be/def456?si=XYZ789", raw_text="x")
+    assert a != b  # stripping tracking params must not cause distinct content to collide
