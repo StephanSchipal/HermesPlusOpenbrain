@@ -20,14 +20,14 @@ mcp = FastMCP("openbrain", host="0.0.0.0")
 @mcp.tool()
 def save(raw_text: str, summary: str, keywords: list[str],
          source: str | None = None, source_url: str | None = None,
-         lang: str | None = None) -> dict:
+         lang: str | None = None, metadata: dict | None = None) -> dict:
     """Store a captured note. The summary is embedded for semantic search.
     Pass the original text as raw_text, a concise summary, and ~5 keywords.
     Idempotent: resending the same link/text returns the existing id (deduped)."""
     with get_conn() as conn:
         return store.save_capture(
             conn, raw_text=raw_text, summary=summary, keywords=keywords,
-            source=source, source_url=source_url, lang=lang,
+            source=source, source_url=source_url, lang=lang, metadata=metadata,
         )
 
 @mcp.tool()
@@ -55,11 +55,12 @@ def delete(id: str) -> dict:
         return {"id": id, "deleted": store.delete_capture(conn, capture_id=id)}
 
 @mcp.tool()
-def update(id: str, summary: str | None = None, keywords: list[str] | None = None) -> dict:
+def update(id: str, summary: str | None = None, keywords: list[str] | None = None,
+           metadata: dict | None = None) -> dict:
     """Edit a capture: change its summary and/or keywords (re-embeds if summary changes)."""
     with get_conn() as conn:
         return {"id": id, "updated": store.update_capture(
-            conn, capture_id=id, summary=summary, keywords=keywords)}
+            conn, capture_id=id, summary=summary, keywords=keywords, metadata=metadata)}
 
 class BearerAuthMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):

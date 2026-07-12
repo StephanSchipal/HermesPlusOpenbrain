@@ -1,6 +1,5 @@
 # tests/test_store.py
 import os
-import uuid
 import pytest
 from app.db import get_conn
 from app import store
