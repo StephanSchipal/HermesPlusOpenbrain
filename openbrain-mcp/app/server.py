@@ -10,7 +10,12 @@ from app.config import OPENBRAIN_TOKEN
 from app.db import get_conn
 from app import store
 
-mcp = FastMCP("openbrain")
+# host="0.0.0.0" (not the FastMCP default "127.0.0.1") disables the MCP SDK's
+# DNS-rebinding host-header check, which otherwise 421s any request whose Host
+# header isn't a localhost variant -- i.e. every real request once deployed
+# (Hermes calls openbrain-mcp:8080, Traefik forwards the public hostname).
+# The bearer-token middleware below is this server's actual security boundary.
+mcp = FastMCP("openbrain", host="0.0.0.0")
 
 @mcp.tool()
 def save(raw_text: str, summary: str, keywords: list[str],
