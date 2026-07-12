@@ -494,7 +494,9 @@ from app.config import DATABASE_URL
 def get_conn() -> Iterator[psycopg.Connection]:
     conn = psycopg.connect(DATABASE_URL)
     try:
-        register_vector(conn)          # lets us pass/return Python lists as vectors
+        register_vector(conn)          # registers Vector/ndarray dumpers + vector-column
+                                        # loading; plain list params still need an explicit
+                                        # ::vector cast at the call site (see store.py)
         yield conn
     finally:
         conn.close()
