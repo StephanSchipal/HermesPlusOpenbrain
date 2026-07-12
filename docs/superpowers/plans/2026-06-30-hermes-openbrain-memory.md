@@ -881,6 +881,57 @@ git add openbrain-mcp/app/server.py
 git commit -m "feat(server): MCP tools over streamable-http with bearer auth + health"
 ```
 
+### Task 2.5b: Regression test for the DNS-rebinding host-header fix
+
+**Files:**
+- Create: `openbrain-mcp/tests/test_server.py`
+
+The `host="0.0.0.0"` fix (Task 2.5, "Revised 2026-07-12 (c)") is non-obvious — a future edit that "simplifies" `FastMCP("openbrain", host="0.0.0.0")` back to `FastMCP("openbrain")` (e.g. reasoning that `uvicorn.run(..., host="0.0.0.0")` in `__main__` already covers it) would silently reintroduce a bug where every deployed request 421s. No DB or model download is needed — the DNS-rebinding check happens at the transport layer before any tool/store code runs.
+
+- [ ] **Step 1: Write the test** **[repo]**
+
+```python
+# tests/test_server.py
+from starlette.testclient import TestClient
+import app.server as server_module
+
+def _client(monkeypatch, token: str = "testtoken") -> TestClient:
+    monkeypatch.setattr(server_module, "OPENBRAIN_TOKEN", token)
+    return TestClient(server_module.build_app())
+
+def test_health_requires_no_auth(monkeypatch):
+    client = _client(monkeypatch)
+    resp = client.get("/health")
+    assert resp.status_code == 200
+    assert resp.json() == {"ok": True}
+
+def test_mcp_requires_auth(monkeypatch):
+    client = _client(monkeypatch)
+    resp = client.get("/mcp")
+    assert resp.status_code == 401
+
+def test_mcp_accepts_non_localhost_host_headers(monkeypatch):
+    client = _client(monkeypatch)
+    for host in ("brain.srv1608402.hstgr.cloud", "openbrain-mcp:8080"):
+        resp = client.get("/mcp", headers={
+            "Authorization": "Bearer testtoken",
+            "Host": host,
+        })
+        assert resp.status_code != 421, f"Host header {host!r} was rejected by DNS-rebinding check"
+```
+
+- [ ] **Step 2: Run the tests** **[repo]**
+
+Run: `cd openbrain-mcp && python -m pytest tests/test_server.py -v`
+Expected: PASS (3 tests). No `DATABASE_URL` needed — these requests never reach `store.py`.
+
+- [ ] **Step 3: Commit** **[repo]**
+
+```bash
+git add openbrain-mcp/tests/test_server.py
+git commit -m "test(server): regression test for DNS-rebinding host-header fix"
+```
+
 ---
 
 ## Phase 3 — Containerize and run the database
