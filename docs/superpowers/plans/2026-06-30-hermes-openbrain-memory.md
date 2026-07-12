@@ -10,6 +10,8 @@
 
 **Revised 2026-07-03 (b):** Phase 0 completed on the live VPS. All placeholders resolved — see the "Resolved values" table at the top of Phase 0. Notably, Traefik runs in `network_mode: host` (not on a shared bridge network), which simplified the network design to two networks: `openbrain_internal` (db ↔ mcp only) and the existing `hermes-agent-7qpk_default` (mcp ↔ Hermes only) — `openbrain-db` is now structurally unreachable from Hermes, not just unreachable by convention.
 
+**Revised 2026-07-12:** During code review of Task 2.1b (content fingerprint), found that naive URL normalization (lowercase + strip scheme + strip trailing slash) fails to dedupe the dominant real-world case: WhatsApp-forwarded YouTube links carry a `?si=<id>` tracking param (unique per share) and Substack links often carry `utm_*` params, so two shares of the same content would get different fingerprints and silently fail to dedupe. Fixed while cheap (no stored data yet) — `_normalize_url` now also strips a known tracking-param set and the `www.` prefix. See updated Task 2.1b below.
+
 **Tech Stack:** Docker Compose, Postgres 16, `pgvector`, Python 3.11, official MCP SDK (`mcp.server.fastmcp.FastMCP`) over Streamable HTTP, Starlette/uvicorn, `sentence-transformers` (`intfloat/multilingual-e5-small`), `psycopg` 3 + `pgvector`, Traefik.
 
 **Where things run:**
@@ -346,12 +348,27 @@ def test_different_content_differs():
 def test_is_hex_sha256():
     fp = content_fingerprint(source_url=None, raw_text="anything")
     assert len(fp) == 64 and all(c in "0123456789abcdef" for c in fp)
+
+def test_strips_known_tracking_params():
+    a = content_fingerprint(source_url="https://youtu.be/abc123?si=XYZ789", raw_text="x")
+    b = content_fingerprint(source_url="https://youtu.be/abc123", raw_text="y")
+    assert a == b  # YouTube share links append a per-share ?si= token
+
+def test_strips_www_prefix():
+    a = content_fingerprint(source_url="https://www.youtube.com/watch?v=abc", raw_text="x")
+    b = content_fingerprint(source_url="https://youtube.com/watch?v=abc", raw_text="y")
+    assert a == b
+
+def test_different_urls_still_differ_after_normalization():
+    a = content_fingerprint(source_url="https://youtu.be/abc123?si=XYZ789", raw_text="x")
+    b = content_fingerprint(source_url="https://youtu.be/def456?si=XYZ789", raw_text="x")
+    assert a != b  # stripping tracking params must not cause distinct content to collide
 ```
 
 - [ ] **Step 2: Run test to verify it fails** **[repo]**
 
 Run: `cd openbrain-mcp && python -m pytest tests/test_fingerprint.py -v`
-Expected: FAIL — `ModuleNotFoundError: No module named 'app.fingerprint'`.
+Expected: FAIL — `ModuleNotFoundError: No module named 'app.fingerprint'` (first pass), or (if `app/fingerprint.py` already exists from a prior pass) the three new tracking-param/www/differentiation tests FAIL on assertion while the original 4 still PASS.
 
 - [ ] **Step 3: Write minimal implementation** **[repo]**
 
@@ -359,11 +376,26 @@ Expected: FAIL — `ModuleNotFoundError: No module named 'app.fingerprint'`.
 # app/fingerprint.py
 import hashlib
 import re
+from urllib.parse import parse_qsl, urlencode
+
+_TRACKING_PARAMS = {
+    "si", "utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content",
+    "fbclid", "gclid",
+}
 
 def _normalize_url(url: str) -> str:
     u = url.strip().lower()
     u = re.sub(r"^https?://", "", u)      # scheme-agnostic
+    if u.startswith("www."):
+        u = u[4:]                          # www. vs bare domain is the same site
     u = u.rstrip("/")                      # ignore trailing slash
+    base, sep, query = u.partition("?")
+    if sep:
+        pairs = sorted(
+            (k, v) for k, v in parse_qsl(query, keep_blank_values=True)
+            if k not in _TRACKING_PARAMS
+        )
+        u = f"{base}?{urlencode(pairs)}" if pairs else base
     return u
 
 def _normalize_text(text: str) -> str:
@@ -372,7 +404,11 @@ def _normalize_text(text: str) -> str:
 def content_fingerprint(*, source_url: str | None, raw_text: str) -> str:
     """Stable dedup key. Prefer the normalized URL; fall back to normalized text.
 
-    Same link (or same text) -> same fingerprint -> deduped on save.
+    Same link (or same text) -> same fingerprint -> deduped on save. URL
+    normalization strips scheme, www., trailing slash, and known per-share
+    tracking params (YouTube's `si`, UTM params, fbclid/gclid) so the same
+    content forwarded twice on WhatsApp still dedupes even though each share
+    link carries a different tracking token.
     """
     basis = _normalize_url(source_url) if source_url else _normalize_text(raw_text)
     return hashlib.sha256(basis.encode("utf-8")).hexdigest()
@@ -381,7 +417,7 @@ def content_fingerprint(*, source_url: str | None, raw_text: str) -> str:
 - [ ] **Step 4: Run test to verify it passes** **[repo]**
 
 Run: `cd openbrain-mcp && python -m pytest tests/test_fingerprint.py -v`
-Expected: PASS (4 tests).
+Expected: PASS (7 tests).
 
 - [ ] **Step 5: Commit** **[repo]**
 
@@ -389,6 +425,8 @@ Expected: PASS (4 tests).
 git add openbrain-mcp/app/fingerprint.py openbrain-mcp/tests/test_fingerprint.py
 git commit -m "feat(fingerprint): content fingerprint for dedup"
 ```
+
+(If Step 5 lands as a second commit because tracking-param stripping was added after an initial commit already existed, use `git commit -m "fix(fingerprint): strip tracking params and www. prefix before hashing"` instead — either is acceptable; what matters is the final state of the two files.)
 
 ### Task 2.2: Embeddings (e5 prefixes)
 
