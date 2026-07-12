@@ -30,3 +30,6 @@ data/
 *.sqlite
 models/
 .cache/
+
+# Git worktrees
+.worktrees/

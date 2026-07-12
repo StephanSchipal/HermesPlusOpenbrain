@@ -10,6 +10,14 @@
 
 **Revised 2026-07-03 (b):** Phase 0 completed on the live VPS. All placeholders resolved — see the "Resolved values" table at the top of Phase 0. Notably, Traefik runs in `network_mode: host` (not on a shared bridge network), which simplified the network design to two networks: `openbrain_internal` (db ↔ mcp only) and the existing `hermes-agent-7qpk_default` (mcp ↔ Hermes only) — `openbrain-db` is now structurally unreachable from Hermes, not just unreachable by convention.
 
+**Revised 2026-07-12:** During code review of Task 2.1b (content fingerprint), found that naive URL normalization (lowercase + strip scheme + strip trailing slash) fails to dedupe the dominant real-world case: WhatsApp-forwarded YouTube links carry a `?si=<id>` tracking param (unique per share) and Substack links often carry `utm_*` params, so two shares of the same content would get different fingerprints and silently fail to dedupe. Fixed while cheap (no stored data yet) — `_normalize_url` now also strips a known tracking-param set and the `www.` prefix. See updated Task 2.1b below.
+
+**Revised 2026-07-12 (d):** During the final whole-implementation review of Phase 1-2, found that `save`/`update`'s MCP tool signatures (Task 2.5) never exposed the `metadata` parameter that `store.save_capture`/`store.update_capture` (Task 2.4) already accept and persist, and that spec §4.3 explicitly lists — confirmed live that a client passing `metadata` got a silent success with the field discarded (no error, no schema entry). Fixed by adding `metadata: dict | None = None` to both tool signatures and passing it through — cheap now, before Task 5.2 locks in the tool schema Hermes will be configured against. See updated Task 2.5 below.
+
+**Revised 2026-07-12 (c):** During code review of Task 2.5 (MCP server), found that `FastMCP("openbrain")` with no explicit `host=` triggers the MCP SDK's DNS-rebinding protection (`host` defaults to `"127.0.0.1"`, and `FastMCP.__init__` auto-sets `transport_security` with `allowed_hosts=["127.0.0.1:*", "localhost:*", "[::1]:*"]` whenever `host` is a localhost variant). Verified live: this returns `421 Invalid Host header` for any request whose `Host` header isn't localhost — which is every real request once deployed (Hermes calls `openbrain-mcp:8080` internally, Traefik forwards `brain.srv1608402.hstgr.cloud` publicly). This would have silently broken Phase 4 (Task 4.2), Task 5.1, and Phase 6, and would have been confusing to debug on the VPS since a 421 doesn't obviously implicate the MCP SDK's host check. Fixed by passing `host="0.0.0.0"` to `FastMCP(...)`, which disables the check (the condition that enables it only fires for the three localhost host values) — the bearer-token middleware is already this server's actual security boundary (spec §6), and DNS-rebinding protection targets browser-based attacks against services that expect to be reachable only from localhost, which doesn't describe this deployment's topology. See updated Task 2.5 below. Caught before Phase 4 deployment, so no wasted VPS debugging cycle.
+
+**Revised 2026-07-12 (b):** During code review of Task 2.2 (embeddings), found that Task 2.4's draft `search_captures` SQL would fail against a live DB: `pgvector`'s psycopg integration only registers value dumpers for its `Vector` class and `numpy.ndarray`, not plain `list` — so a raw `list[float]` bound to `%s` in `embedding <=> %s` (an operator expression, not a column-assignment context) resolves to `double precision[]`, and Postgres has no `<=>` overload for `vector <=> double precision[]` (the array→vector cast is `ASSIGNMENT`-only, not consulted in operator resolution). `save_capture`'s `INSERT ... VALUES (..., %s)` and `update_capture`'s `SET embedding = %s` are unaffected (those ARE assignment contexts). Fixed by adding explicit `::vector` casts to the two placeholders in `search_captures`'s SQL — see Task 2.4 below. Caught before Task 2.4 was implemented, so no wasted build/fix cycle.
+
 **Tech Stack:** Docker Compose, Postgres 16, `pgvector`, Python 3.11, official MCP SDK (`mcp.server.fastmcp.FastMCP`) over Streamable HTTP, Starlette/uvicorn, `sentence-transformers` (`intfloat/multilingual-e5-small`), `psycopg` 3 + `pgvector`, Traefik.
 
 **Where things run:**
@@ -346,12 +354,27 @@ def test_different_content_differs():
 def test_is_hex_sha256():
     fp = content_fingerprint(source_url=None, raw_text="anything")
     assert len(fp) == 64 and all(c in "0123456789abcdef" for c in fp)
+
+def test_strips_known_tracking_params():
+    a = content_fingerprint(source_url="https://youtu.be/abc123?si=XYZ789", raw_text="x")
+    b = content_fingerprint(source_url="https://youtu.be/abc123", raw_text="y")
+    assert a == b  # YouTube share links append a per-share ?si= token
+
+def test_strips_www_prefix():
+    a = content_fingerprint(source_url="https://www.youtube.com/watch?v=abc", raw_text="x")
+    b = content_fingerprint(source_url="https://youtube.com/watch?v=abc", raw_text="y")
+    assert a == b
+
+def test_different_urls_still_differ_after_normalization():
+    a = content_fingerprint(source_url="https://youtu.be/abc123?si=XYZ789", raw_text="x")
+    b = content_fingerprint(source_url="https://youtu.be/def456?si=XYZ789", raw_text="x")
+    assert a != b  # stripping tracking params must not cause distinct content to collide
 ```
 
 - [ ] **Step 2: Run test to verify it fails** **[repo]**
 
 Run: `cd openbrain-mcp && python -m pytest tests/test_fingerprint.py -v`
-Expected: FAIL — `ModuleNotFoundError: No module named 'app.fingerprint'`.
+Expected: FAIL — `ModuleNotFoundError: No module named 'app.fingerprint'` (first pass), or (if `app/fingerprint.py` already exists from a prior pass) the three new tracking-param/www/differentiation tests FAIL on assertion while the original 4 still PASS.
 
 - [ ] **Step 3: Write minimal implementation** **[repo]**
 
@@ -359,11 +382,26 @@ Expected: FAIL — `ModuleNotFoundError: No module named 'app.fingerprint'`.
 # app/fingerprint.py
 import hashlib
 import re
+from urllib.parse import parse_qsl, urlencode
+
+_TRACKING_PARAMS = {
+    "si", "utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content",
+    "fbclid", "gclid",
+}
 
 def _normalize_url(url: str) -> str:
     u = url.strip().lower()
     u = re.sub(r"^https?://", "", u)      # scheme-agnostic
+    if u.startswith("www."):
+        u = u[4:]                          # www. vs bare domain is the same site
     u = u.rstrip("/")                      # ignore trailing slash
+    base, sep, query = u.partition("?")
+    if sep:
+        pairs = sorted(
+            (k, v) for k, v in parse_qsl(query, keep_blank_values=True)
+            if k not in _TRACKING_PARAMS
+        )
+        u = f"{base}?{urlencode(pairs)}" if pairs else base
     return u
 
 def _normalize_text(text: str) -> str:
@@ -372,7 +410,11 @@ def _normalize_text(text: str) -> str:
 def content_fingerprint(*, source_url: str | None, raw_text: str) -> str:
     """Stable dedup key. Prefer the normalized URL; fall back to normalized text.
 
-    Same link (or same text) -> same fingerprint -> deduped on save.
+    Same link (or same text) -> same fingerprint -> deduped on save. URL
+    normalization strips scheme, www., trailing slash, and known per-share
+    tracking params (YouTube's `si`, UTM params, fbclid/gclid) so the same
+    content forwarded twice on WhatsApp still dedupes even though each share
+    link carries a different tracking token.
     """
     basis = _normalize_url(source_url) if source_url else _normalize_text(raw_text)
     return hashlib.sha256(basis.encode("utf-8")).hexdigest()
@@ -381,7 +423,7 @@ def content_fingerprint(*, source_url: str | None, raw_text: str) -> str:
 - [ ] **Step 4: Run test to verify it passes** **[repo]**
 
 Run: `cd openbrain-mcp && python -m pytest tests/test_fingerprint.py -v`
-Expected: PASS (4 tests).
+Expected: PASS (7 tests).
 
 - [ ] **Step 5: Commit** **[repo]**
 
@@ -389,6 +431,8 @@ Expected: PASS (4 tests).
 git add openbrain-mcp/app/fingerprint.py openbrain-mcp/tests/test_fingerprint.py
 git commit -m "feat(fingerprint): content fingerprint for dedup"
 ```
+
+(If Step 5 lands as a second commit because tracking-param stripping was added after an initial commit already existed, use `git commit -m "fix(fingerprint): strip tracking params and www. prefix before hashing"` instead — either is acceptable; what matters is the final state of the two files.)
 
 ### Task 2.2: Embeddings (e5 prefixes)
 
@@ -454,7 +498,9 @@ from app.config import DATABASE_URL
 def get_conn() -> Iterator[psycopg.Connection]:
     conn = psycopg.connect(DATABASE_URL)
     try:
-        register_vector(conn)          # lets us pass/return Python lists as vectors
+        register_vector(conn)          # registers Vector/ndarray dumpers + vector-column
+                                        # loading; plain list params still need an explicit
+                                        # ::vector cast at the call site (see store.py)
         yield conn
     finally:
         conn.close()
@@ -624,9 +670,9 @@ def search_captures(conn: psycopg.Connection, *, query: str, k: int = 5) -> list
         cur.execute(
             """
             SELECT id, summary, keywords, source, source_url, lang, created_at,
-                   1 - (embedding <=> %s) AS score
+                   1 - (embedding <=> %s::vector) AS score
             FROM captures
-            ORDER BY embedding <=> %s
+            ORDER BY embedding <=> %s::vector
             LIMIT %s
             """,
             (emb, emb, k),
@@ -714,7 +760,7 @@ def _row_to_result(r) -> dict:
 - [ ] **Step 4: Run tests to verify they pass** **[repo, needs DATABASE_URL]**
 
 Run: `cd openbrain-mcp && python -m pytest tests/test_store.py -v`
-Expected: PASS (6 tests). Requires the DB from Task 3.1–3.3 to be up and `DATABASE_URL` exported.
+Expected: PASS (5 tests). Requires the DB from Task 3.1–3.3 to be up and `DATABASE_URL` exported. (Verified 2026-07-12 against a local throwaway pgvector container, including a real concurrent-write race test for the dedup fallback — see plan revision notes.)
 
 - [ ] **Step 5: Commit** **[repo]**
 
@@ -743,19 +789,24 @@ from app.config import OPENBRAIN_TOKEN
 from app.db import get_conn
 from app import store
 
-mcp = FastMCP("openbrain")
+# host="0.0.0.0" (not the FastMCP default "127.0.0.1") disables the MCP SDK's
+# DNS-rebinding host-header check, which otherwise 421s any request whose Host
+# header isn't a localhost variant -- i.e. every real request once deployed
+# (Hermes calls openbrain-mcp:8080, Traefik forwards the public hostname).
+# The bearer-token middleware below is this server's actual security boundary.
+mcp = FastMCP("openbrain", host="0.0.0.0")
 
 @mcp.tool()
 def save(raw_text: str, summary: str, keywords: list[str],
          source: str | None = None, source_url: str | None = None,
-         lang: str | None = None) -> dict:
+         lang: str | None = None, metadata: dict | None = None) -> dict:
     """Store a captured note. The summary is embedded for semantic search.
     Pass the original text as raw_text, a concise summary, and ~5 keywords.
     Idempotent: resending the same link/text returns the existing id (deduped)."""
     with get_conn() as conn:
         return store.save_capture(
             conn, raw_text=raw_text, summary=summary, keywords=keywords,
-            source=source, source_url=source_url, lang=lang,
+            source=source, source_url=source_url, lang=lang, metadata=metadata,
         )
 
 @mcp.tool()
@@ -783,11 +834,12 @@ def delete(id: str) -> dict:
         return {"id": id, "deleted": store.delete_capture(conn, capture_id=id)}
 
 @mcp.tool()
-def update(id: str, summary: str | None = None, keywords: list[str] | None = None) -> dict:
+def update(id: str, summary: str | None = None, keywords: list[str] | None = None,
+           metadata: dict | None = None) -> dict:
     """Edit a capture: change its summary and/or keywords (re-embeds if summary changes)."""
     with get_conn() as conn:
         return {"id": id, "updated": store.update_capture(
-            conn, capture_id=id, summary=summary, keywords=keywords)}
+            conn, capture_id=id, summary=summary, keywords=keywords, metadata=metadata)}
 
 class BearerAuthMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
@@ -830,6 +882,57 @@ Expected: `/health` returns ok; `/mcp` without token is 401; with token is not 4
 ```bash
 git add openbrain-mcp/app/server.py
 git commit -m "feat(server): MCP tools over streamable-http with bearer auth + health"
+```
+
+### Task 2.5b: Regression test for the DNS-rebinding host-header fix
+
+**Files:**
+- Create: `openbrain-mcp/tests/test_server.py`
+
+The `host="0.0.0.0"` fix (Task 2.5, "Revised 2026-07-12 (c)") is non-obvious — a future edit that "simplifies" `FastMCP("openbrain", host="0.0.0.0")` back to `FastMCP("openbrain")` (e.g. reasoning that `uvicorn.run(..., host="0.0.0.0")` in `__main__` already covers it) would silently reintroduce a bug where every deployed request 421s. No DB or model download is needed — the DNS-rebinding check happens at the transport layer before any tool/store code runs.
+
+- [ ] **Step 1: Write the test** **[repo]**
+
+```python
+# tests/test_server.py
+from starlette.testclient import TestClient
+import app.server as server_module
+
+def _client(monkeypatch, token: str = "testtoken") -> TestClient:
+    monkeypatch.setattr(server_module, "OPENBRAIN_TOKEN", token)
+    return TestClient(server_module.build_app())
+
+def test_health_requires_no_auth(monkeypatch):
+    client = _client(monkeypatch)
+    resp = client.get("/health")
+    assert resp.status_code == 200
+    assert resp.json() == {"ok": True}
+
+def test_mcp_requires_auth(monkeypatch):
+    client = _client(monkeypatch)
+    resp = client.get("/mcp")
+    assert resp.status_code == 401
+
+def test_mcp_accepts_non_localhost_host_headers(monkeypatch):
+    client = _client(monkeypatch)
+    for host in ("brain.srv1608402.hstgr.cloud", "openbrain-mcp:8080"):
+        resp = client.get("/mcp", headers={
+            "Authorization": "Bearer testtoken",
+            "Host": host,
+        })
+        assert resp.status_code != 421, f"Host header {host!r} was rejected by DNS-rebinding check"
+```
+
+- [ ] **Step 2: Run the tests** **[repo]**
+
+Run: `cd openbrain-mcp && python -m pytest tests/test_server.py -v`
+Expected: PASS (3 tests). No `DATABASE_URL` needed — these requests never reach `store.py`.
+
+- [ ] **Step 3: Commit** **[repo]**
+
+```bash
+git add openbrain-mcp/tests/test_server.py
+git commit -m "test(server): regression test for DNS-rebinding host-header fix"
 ```
 
 ---
@@ -1215,5 +1318,5 @@ git tag v0.1.0 && git push --tags
 ## Self-review notes (author)
 
 - **Spec coverage:** Hosting/self-host (Phase 3–4), capture via WhatsApp+Hermes (Phase 5), summarize+~5 keywords by Hermes (Task 5.2), lean custom MCP server (Phase 2), local multilingual embeddings (Task 2.2), retrieval from WhatsApp + laptop (Phases 5–6), Traefik TLS + bearer token (Phase 4), data model incl. `fingerprint`/`updated_at` (Task 1.1/2.4), all **six** MCP tools — save/search/list_recent/stats/delete/update (Task 2.5), fingerprint dedup (Task 2.1b + save_capture + Phase 7 Step 4), Auto-Capture skill reference (Task 5.2), security model (Task 2.5 auth + Task 4), success criteria (Phase 7). Open questions §8 → Phase 0.
-- **Type consistency:** tool `list_recent`/`stats`/`delete`/`update` delegate to store `fetch_recent`/`compute_stats`/`delete_capture`/`update_capture` (renamed to avoid shadowing); `save_capture` now returns a dict `{id, stored, deduped}` and the `save` tool returns it verbatim — the two store tests that ignore the return value are unaffected; `content_fingerprint(source_url=, raw_text=)` keyword signature matches its one call site in `save_capture`; result dicts share `_row_to_result`. Vector param passed as Python list works because `register_vector` is called on every connection.
-- **Known follow-ups (not blockers):** connection-per-request is fine for personal volume (add pooling later); HNSW index is created empty and fills as rows insert; consider a read-only token for laptop vs write token for Hermes (spec §6 optional hardening); `update` intentionally does not recompute `fingerprint` (dedup keys off original source, which is correct).
+- **Type consistency:** tool `list_recent`/`stats`/`delete`/`update` delegate to store `fetch_recent`/`compute_stats`/`delete_capture`/`update_capture` (renamed to avoid shadowing); `save_capture` now returns a dict `{id, stored, deduped}` and the `save` tool returns it verbatim — the two store tests that ignore the return value are unaffected; `content_fingerprint(source_url=, raw_text=)` keyword signature matches its one call site in `save_capture`; result dicts share `_row_to_result`. Vector params in `INSERT`/`UPDATE` column-assignment contexts (`save_capture`, `update_capture`) work with a plain Python list via Postgres's `double precision[] -> vector` assignment cast; `search_captures`'s `ORDER BY`/`SELECT` operator expressions do not get that cast automatically, which is why its SQL uses explicit `::vector` casts (corrected 2026-07-12 (b), see Task 2.4).
+- **Known follow-ups (not blockers):** connection-per-request is fine for personal volume (add pooling later); HNSW index is created empty and fills as rows insert; consider a read-only token for laptop vs write token for Hermes (spec §6 optional hardening); `update` intentionally does not recompute `fingerprint` (dedup keys off original source, which is correct); `_normalize_url`'s tracking-param stripping (Task 2.1b, hardened 2026-07-12) has two low-impact edge cases noted in code review — URL fragments are inconsistently preserved depending on whether a `?query` is also present (swap `.partition("?")` for `urllib.parse.urlsplit()` to fix for free), and the whole-URL lowercasing predates the fix and could theoretically collide two case-sensitive video IDs that differ only by case. Neither has hit real WhatsApp-shared YouTube/Substack links in practice; revisit if dedup ever misbehaves. `app/embeddings.py`'s `get_model()` (Task 2.2) uses `@lru_cache(maxsize=1)`, whose cache-miss path runs outside the lock — two near-simultaneous first requests after a cold start could each construct a `SentenceTransformer` instance before the cache settles (wasted transient memory/CPU, not incorrect results); cheap fix later is a `threading.Lock` or eager-loading at import since the Dockerfile already pre-caches weights at build time. `embeddings.py` also has no committed unit test (by design — avoids requiring a model download in CI); a model-mocking unit test (monkeypatch `SentenceTransformer`) would give regression coverage for the prefix/normalization logic without that cost, if ever revisited. `save_capture`'s dedup-hit fast path (Task 2.4) returns early without `conn.commit()`/`rollback()`, leaving the connection idle-in-transaction until `get_conn()` closes it — harmless today under the connection-per-call model (verified: no data mutated on that path, and the connection is closed immediately after), but would need an explicit `rollback()` there before any future connection-pooling change reuses connections across calls. `_row_to_result`'s positional-tuple indexing (`r[0]`..`r[7]`) couples three independently-maintained SQL column lists by position with no compile-time or runtime check that they stay in sync; a future column reorder in one query without updating the others would silently produce wrong data. Verified via live-DB concurrency testing (real threaded race) that the dedup race-fallback in `save_capture` is correct. `BearerAuthMiddleware`'s token comparison (Task 2.5) uses `!=` rather than `hmac.compare_digest`, a non-constant-time comparison; not exploitable at this threat model (personal-use server, long random token, network jitter dwarfs the timing signal) but a free hardening if this file is touched again. Store-layer exceptions (e.g. a malformed UUID passed to `delete`) surface raw Postgres/psycopg error text verbatim to the authenticated caller rather than a clean error message; not a security boundary issue (caller already holds the bearer token) but worth a thin try/except per tool if this server is ever exposed to a less-trusted caller than "yourself via Hermes." `stats` (Task 2.4/2.5) doesn't return "top keywords," which spec §4.3.4 lists — this was already true in the plan's own original Task 2.4 draft (not introduced by any implementer), silently dropped without a callout; low priority, would need a `GROUP BY unnest(keywords)` style query if ever added. Four of the six MCP tools (`save`/`stats`/`delete`/`update`, all with a bare `-> dict` return annotation) never produce MCP `structuredContent` the way `search`/`list_recent` (`-> list[dict]`) do, per how the MCP SDK's `func_metadata.py` builds output schemas — harmless today (the unstructured `.content` text block always carries valid JSON, which both Hermes and Claude Desktop/Code already read), but an inconsistency across the six tools worth a one-line-per-tool fix (`-> dict` to `-> dict[str, Any]`) if a stricter client ever depends on structured output. `config.py`'s `EMBED_DIM = 384` is defined but never referenced anywhere (not cross-checked against the schema's `vector(384)` or the model's actual output dimension) — harmless with the current default model, cosmetic dead config. `metadata` (wired into `save`/`update` 2026-07-12 (d)) is now write-reachable but has no read path — `_row_to_result` (Task 2.4) never selects the `metadata` column, so `search`/`list_recent` can't return it and there's no get-by-id tool; matches spec §4.3.2's documented `search` return fields (no metadata listed there), so not a spec violation, but worth a future task if metadata ever needs to be read back. No test exercises `metadata` in `test_store.py`/`test_server.py` (verified manually during review instead). `update_capture`'s `metadata` semantics are full-replace, not merge — passing `metadata` to `update` clobbers the entire previously-stored value rather than merging keys; undocumented in the tool's docstring, worth a one-line addition next time `server.py` is touched.
