@@ -12,6 +12,8 @@
 
 **Revised 2026-07-12:** During code review of Task 2.1b (content fingerprint), found that naive URL normalization (lowercase + strip scheme + strip trailing slash) fails to dedupe the dominant real-world case: WhatsApp-forwarded YouTube links carry a `?si=<id>` tracking param (unique per share) and Substack links often carry `utm_*` params, so two shares of the same content would get different fingerprints and silently fail to dedupe. Fixed while cheap (no stored data yet) — `_normalize_url` now also strips a known tracking-param set and the `www.` prefix. See updated Task 2.1b below.
 
+**Revised 2026-07-13:** During code review of Task 3.1 (Dockerfile), found — and empirically confirmed with a real `docker build` — that the Dockerfile as originally drafted cannot build at all: `RUN python -m pip install --no-cache-dir .` runs while only `pyproject.toml` has been copied in (deliberately, for layer-caching), but `pyproject.toml` declares `[tool.setuptools] packages = ["app"]` explicitly, so setuptools' metadata/`egg_info` step fails immediately with `package directory 'app' does not exist` — before any dependency is even resolved. Fixed by stubbing an empty `app/__init__.py` just for that layer (removed again before the real `COPY app ./app`), which lets dependency resolution succeed while preserving the original layer-caching intent. Verified with an actual `docker build` completing successfully. See updated Task 3.1 below.
+
 **Revised 2026-07-12 (d):** During the final whole-implementation review of Phase 1-2, found that `save`/`update`'s MCP tool signatures (Task 2.5) never exposed the `metadata` parameter that `store.save_capture`/`store.update_capture` (Task 2.4) already accept and persist, and that spec §4.3 explicitly lists — confirmed live that a client passing `metadata` got a silent success with the field discarded (no error, no schema entry). Fixed by adding `metadata: dict | None = None` to both tool signatures and passing it through — cheap now, before Task 5.2 locks in the tool schema Hermes will be configured against. See updated Task 2.5 below.
 
 **Revised 2026-07-12 (c):** During code review of Task 2.5 (MCP server), found that `FastMCP("openbrain")` with no explicit `host=` triggers the MCP SDK's DNS-rebinding protection (`host` defaults to `"127.0.0.1"`, and `FastMCP.__init__` auto-sets `transport_security` with `allowed_hosts=["127.0.0.1:*", "localhost:*", "[::1]:*"]` whenever `host` is a localhost variant). Verified live: this returns `421 Invalid Host header` for any request whose `Host` header isn't localhost — which is every real request once deployed (Hermes calls `openbrain-mcp:8080` internally, Traefik forwards `brain.srv1608402.hstgr.cloud` publicly). This would have silently broken Phase 4 (Task 4.2), Task 5.1, and Phase 6, and would have been confusing to debug on the VPS since a 421 doesn't obviously implicate the MCP SDK's host check. Fixed by passing `host="0.0.0.0"` to `FastMCP(...)`, which disables the check (the condition that enables it only fires for the three localhost host values) — the bearer-token middleware is already this server's actual security boundary (spec §6), and DNS-rebinding protection targets browser-based attacks against services that expect to be reachable only from localhost, which doesn't describe this deployment's topology. See updated Task 2.5 below. Caught before Phase 4 deployment, so no wasted VPS debugging cycle.
@@ -952,7 +954,15 @@ FROM python:3.11-slim
 # Build deps for psycopg/torch wheels are not needed (binary wheels), keep slim.
 WORKDIR /app
 COPY pyproject.toml ./
-RUN python -m pip install --no-cache-dir .
+# pyproject.toml declares packages = ["app"] explicitly (not auto-discovered), so
+# `pip install .` fails at the metadata/egg_info step if `app/` doesn't exist yet --
+# stub it out just for this layer so dependency resolution succeeds; the real
+# `COPY app ./app` below overwrites it. This keeps the dependency-install layer
+# cacheable independently of app source changes (the whole point of installing
+# from pyproject.toml before COPY app ./app).
+RUN mkdir app && touch app/__init__.py && \
+    python -m pip install --no-cache-dir . && \
+    rm -rf app
 
 # Pre-download the embedding model at build time so first request is fast
 ENV OPENBRAIN_MODEL=intfloat/multilingual-e5-small
