@@ -176,23 +176,44 @@ DATABASE_URL="postgresql://openbrain:<password>@localhost:5432/openbrain" \
 container on `openbrain_internal`, or add a temporary port mapping via a local, gitignored
 `docker-compose.override.yml`.)
 
-## Deploying to the VPS (Phase 4, not yet executed)
+## The plan for Phases 4-6 (not yet executed)
 
-The intended flow, per the plan:
+Three separate phases, each depending on the one before it. None of this touches Hermes or laptop
+clients until Phase 4's containers are actually up and reachable over real HTTPS.
+
+### Phase 4 — Deploy behind Traefik on the VPS
+
+Gets the two containers running on the real server and proves they're reachable — nothing else
+yet wired up.
 
 1. `git clone` this repo onto the VPS, `cd deploy`, `cp .env.example .env` and fill in real values
    (`OPENBRAIN_HOST=brain.<your-hostinger-subdomain>.hstgr.cloud` — the wildcard DNS for that
    subdomain already resolves to the VPS, confirmed in Phase 0, no DNS changes needed).
-2. `docker compose -f docker-compose.openbrain.yml up -d --build`.
-3. Traefik (already running on the VPS in `network_mode: host`, fronting Hermes the same way)
+2. `docker compose -f docker-compose.openbrain.yml up -d --build`; confirm both services `healthy`.
+3. Verify internally first: from a throwaway container on the same Docker network,
+   `curl http://openbrain-mcp:8080/health` → `{"ok":true}`, `/mcp` with no token → `401`.
+4. Traefik (already running on the VPS in `network_mode: host`, fronting Hermes the same way)
    picks up the compose labels automatically and issues a Let's Encrypt cert for `OPENBRAIN_HOST`
-   — no Traefik config changes needed.
-4. Register `http://openbrain-mcp:8080/mcp` (internal address, no TLS hop needed) as an MCP server
-   inside Hermes' own configuration, with the bearer token as a header (Phase 5).
-5. Add a short capture instruction to Hermes: on receiving a link/note, fetch it, summarize, pull
-   ~5 keywords, call `save`; on a recall request, call `search` (Phase 5).
-6. Add `https://<OPENBRAIN_HOST>/mcp` as a remote MCP server in Claude Desktop / Claude Code, same
-   bearer token (Phase 6).
+   — no Traefik config changes needed. Verify from outside: `curl https://$OPENBRAIN_HOST/health`
+   → valid cert, `{"ok":true}`; `/mcp` with the bearer token → not `401`.
+
+### Phase 5 — Wire Hermes-Agent to OpenBrain
+
+Only starts once Phase 4's `https://$OPENBRAIN_HOST/mcp` is confirmed reachable.
+
+1. Register `http://openbrain-mcp:8080/mcp` (internal address, no TLS hop needed — Hermes and
+   `openbrain-mcp` share a Docker network) as an MCP server inside Hermes' own configuration, with
+   the bearer token as a header.
+2. Add a short capture instruction to Hermes: on receiving a link/note, fetch it, summarize, pull
+   ~5 keywords, call `save`; on a recall request, call `search`.
+
+### Phase 6 — Connect laptop clients
+
+Independent of Phase 5 — can happen before or after it, since it only needs Phase 4's public
+HTTPS endpoint, not Hermes.
+
+1. Add `https://<OPENBRAIN_HOST>/mcp` as a remote MCP server in Claude Desktop / Claude Code, same
+   bearer token.
 
 ## Using it (once Phases 5-6 are live)
 
