@@ -4,6 +4,7 @@
 # Secrets / environment
 .env
 .env.*
+!.env.example
 *.secret
 *secret*
 *token*
