@@ -20,7 +20,7 @@ infrastructure you already own.
 | 1 | Postgres + pgvector schema | ✅ Done |
 | 2 | `openbrain-mcp` service (6 MCP tools, TDD, 18 tests) | ✅ Done |
 | 3 | Containerize (Dockerfile + Compose), verified end-to-end locally | ✅ Done |
-| 4 | Deploy behind Traefik on the real VPS | ⬜ Not started |
+| 4 | Deploy behind Traefik on the real VPS | ✅ Done |
 | 5 | Wire Hermes-Agent to call `openbrain-mcp` | ⬜ Not started |
 | 6 | Connect Claude Desktop / Claude Code | ⬜ Not started |
 | 7 | End-to-end acceptance on the real stack | ⬜ Not started |
@@ -176,26 +176,25 @@ DATABASE_URL="postgresql://openbrain:<password>@localhost:5432/openbrain" \
 container on `openbrain_internal`, or add a temporary port mapping via a local, gitignored
 `docker-compose.override.yml`.)
 
-## The plan for Phases 4-6 (not yet executed)
+## Phase 4 — Deployed behind Traefik on the VPS
 
-Three separate phases, each depending on the one before it. None of this touches Hermes or laptop
-clients until Phase 4's containers are actually up and reachable over real HTTPS.
+The two containers are live on the real server (`brain.srv1608402.hstgr.cloud`), both `healthy`,
+and reachable over real HTTPS with a valid Let's Encrypt cert:
 
-### Phase 4 — Deploy behind Traefik on the VPS
+- `curl https://$OPENBRAIN_HOST/health` → `{"ok":true}` (valid cert, no TLS warning)
+- `curl https://$OPENBRAIN_HOST/mcp` with no token → `401`; with the bearer token → not `401`
+  (`406` is expected for a bare `curl GET` — MCP's Streamable HTTP endpoint requires proper
+  `Accept`/session headers; the point of that check is only that auth isn't rejecting it)
 
-Gets the two containers running on the real server and proves they're reachable — nothing else
-yet wired up.
+`docker compose -f docker-compose.openbrain.yml up -d --build` was run on the VPS from a fresh
+`git clone`, with `deploy/.env` filled in from `.env.example` (real `POSTGRES_PASSWORD`,
+`OPENBRAIN_TOKEN`, and `OPENBRAIN_HOST`). Traefik picked up the compose labels automatically —
+no Traefik config changes were needed.
 
-1. `git clone` this repo onto the VPS, `cd deploy`, `cp .env.example .env` and fill in real values
-   (`OPENBRAIN_HOST=brain.<your-hostinger-subdomain>.hstgr.cloud` — the wildcard DNS for that
-   subdomain already resolves to the VPS, confirmed in Phase 0, no DNS changes needed).
-2. `docker compose -f docker-compose.openbrain.yml up -d --build`; confirm both services `healthy`.
-3. Verify internally first: from a throwaway container on the same Docker network,
-   `curl http://openbrain-mcp:8080/health` → `{"ok":true}`, `/mcp` with no token → `401`.
-4. Traefik (already running on the VPS in `network_mode: host`, fronting Hermes the same way)
-   picks up the compose labels automatically and issues a Let's Encrypt cert for `OPENBRAIN_HOST`
-   — no Traefik config changes needed. Verify from outside: `curl https://$OPENBRAIN_HOST/health`
-   → valid cert, `{"ok":true}`; `/mcp` with the bearer token → not `401`.
+## The plan for Phases 5-6 (not yet executed)
+
+Two separate phases; Phase 6 doesn't depend on Phase 5 — it only needs Phase 4's public HTTPS
+endpoint, not Hermes.
 
 ### Phase 5 — Wire Hermes-Agent to OpenBrain
 

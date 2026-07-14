@@ -1136,7 +1136,7 @@ git commit -am "fix: adjustments from live DB integration run" || echo "no chang
 
 **[VPS]**
 
-- [ ] **Step 1: Build and start both services**
+- [x] **Step 1: Build and start both services**
 
 ```bash
 cd HermesPlusOpenbrain/deploy
@@ -1145,7 +1145,7 @@ docker compose -f docker-compose.openbrain.yml ps
 ```
 Expected: both `openbrain-db` and `openbrain-mcp` `healthy`. (First build downloads the model — minutes.)
 
-- [ ] **Step 2: Verify internal health and auth**
+- [x] **Step 2: Verify internal health and auth**
 
 ```bash
 NET=hermes-agent-7qpk_default
@@ -1158,7 +1158,7 @@ Expected: health ok; `/mcp` is 401 without a token.
 
 **[VPS / laptop]**
 
-- [ ] **Step 1: Confirm the cert and routing**
+- [x] **Step 1: Confirm the cert and routing**
 
 ```bash
 TOKEN=$(grep OPENBRAIN_TOKEN HermesPlusOpenbrain/deploy/.env | cut -d= -f2)
