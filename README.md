@@ -236,3 +236,23 @@ HTTPS endpoint, not Hermes.
 See the design spec §6 and the plan's "Known follow-ups" section for lower-priority hardening
 ideas already identified but deliberately deferred (e.g. a read-only token for laptop clients vs.
 a write token for Hermes, constant-time token comparison).
+
+## Related: Hermes Voice (Twilio)
+
+A separate, parallel channel on the same VPS — not part of OpenBrain, but deployed alongside it on
+the same Hermes-Agent host. Full details: [`TwilioDocu.md`](TwilioDocu.md).
+
+> Status: **Live & productive** (since 2026-07-17) — Number: **+43 1 4351876**
+
+Calling that number reaches Hermes over the phone: Twilio's built-in speech recognition (`de-DE`)
+transcribes what you say, a FastAPI voice server (running as a second process inside the existing
+Hermes container, port 8765) forwards it to the Hermes CLI with per-call session context (keyed by
+Twilio's `CallSid`), and the reply is spoken back via `edge-tts` (`de-AT-JonasNeural`). It runs
+independently of the WhatsApp channel and doesn't replace it.
+
+Routing is the interesting part: Traefik reaches the voice server directly over the Docker bridge
+IP via a **file-provider** route (`/docker/traefik/dynamic/voice.yml`), added alongside its
+existing Docker-label-based routes — the live Hermes/WhatsApp container was never touched or
+rebuilt to wire this up, and the existing Let's Encrypt certificate volume was preserved across
+the Traefik recreate. Every inbound Twilio webhook is validated via `X-Twilio-Signature`; Twilio
+credentials live only in `~/.hermes/.env` (mode `600`), never in code or docs.
