@@ -21,7 +21,7 @@ infrastructure you already own.
 | 2 | `openbrain-mcp` service (6 MCP tools, TDD, 18 tests) | ✅ Done |
 | 3 | Containerize (Dockerfile + Compose), verified end-to-end locally | ✅ Done |
 | 4 | Deploy behind Traefik on the real VPS | ✅ Done |
-| 5 | Wire Hermes-Agent to call `openbrain-mcp` | ⬜ Not started |
+| 5 | Wire Hermes-Agent to call `openbrain-mcp` | ✅ Done |
 | 6 | Connect Claude Desktop / Claude Code | ⬜ Not started |
 | 7 | End-to-end acceptance on the real stack | ⬜ Not started |
 
@@ -191,36 +191,42 @@ and reachable over real HTTPS with a valid Let's Encrypt cert:
 `OPENBRAIN_TOKEN`, and `OPENBRAIN_HOST`). Traefik picked up the compose labels automatically —
 no Traefik config changes were needed.
 
-## The plan for Phases 5-6 (not yet executed)
+## Phase 5 — Hermes-Agent wired to OpenBrain
 
-Two separate phases; Phase 6 doesn't depend on Phase 5 — it only needs Phase 4's public HTTPS
-endpoint, not Hermes.
+Live since 2026-07-18. `openbrain-mcp` is registered as an MCP server inside Hermes'
+own configuration (internal address `http://openbrain-mcp:8080/mcp`, no TLS hop needed — Hermes
+and `openbrain-mcp` share a Docker network), and Hermes has a capture directive saved as a
+persistent Skill (`openbrain-capture`): on receiving a link/note it fetches, summarizes, pulls ~5
+keywords, and calls `save`; on a recall request it calls `search`.
 
-### Phase 5 — Wire Hermes-Agent to OpenBrain
+Verified end-to-end over real WhatsApp messages (not a self-triggered test):
+- **Capture:** sent a Substack link → Hermes replied with a German summary + 5 keywords → `psql`
+  confirmed the row (`source=substack`, correct `source_url`, matching summary/keywords, fresh
+  `created_at`).
+- **Recall:** asked Hermes to find the note using deliberately different wording than the
+  original → it returned the correct summary and source URL, confirming semantic search (not a
+  keyword-string match).
 
-Only starts once Phase 4's `https://$OPENBRAIN_HOST/mcp` is confirmed reachable.
+Note: registering the MCP server via direct `config.yaml` edits on the host did not survive a
+Hermes container restart (the Hostinger-managed image appears to regenerate `mcp_servers` from
+another source of truth on boot — not fully root-caused). Both the MCP registration and the
+capture directive ended up being set via Hermes' own in-container tooling (`hermes mcp configure`)
+and a WhatsApp chat instruction (saved as a Skill) instead of hand-edited config files.
 
-1. Register `http://openbrain-mcp:8080/mcp` (internal address, no TLS hop needed — Hermes and
-   `openbrain-mcp` share a Docker network) as an MCP server inside Hermes' own configuration, with
-   the bearer token as a header.
-2. Add a short capture instruction to Hermes: on receiving a link/note, fetch it, summarize, pull
-   ~5 keywords, call `save`; on a recall request, call `search`.
+## The plan for Phase 6 (not yet executed)
 
-### Phase 6 — Connect laptop clients
-
-Independent of Phase 5 — can happen before or after it, since it only needs Phase 4's public
-HTTPS endpoint, not Hermes.
+Independent of Phase 5 — it only needs Phase 4's public HTTPS endpoint, not Hermes.
 
 1. Add `https://<OPENBRAIN_HOST>/mcp` as a remote MCP server in Claude Desktop / Claude Code, same
    bearer token.
 
-## Using it (once Phases 5-6 are live)
+## Using it
 
-- **From WhatsApp:** send a link or a note to Hermes. It replies confirming what it stored (summary
-  + keywords), or that it was already saved if you sent the same link again. Later, ask Hermes to
-  recall something — in different words than you sent it, even a different language — and it
-  answers from what's stored.
-- **From Claude Desktop / Claude Code:** once the remote MCP server is added, ask directly —
+- **From WhatsApp (live):** send a link or a note to Hermes. It replies confirming what it stored
+  (summary + keywords), or that it was already saved if you sent the same link again. Later, ask
+  Hermes to recall something — in different words than you sent it, even a different language —
+  and it answers from what's stored.
+- **From Claude Desktop / Claude Code (once Phase 6 is live):** ask directly —
   *"search my brain for the thing I saved about X"* — and it uses the same `search` tool over the
   same database.
 

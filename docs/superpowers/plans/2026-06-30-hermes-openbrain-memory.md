@@ -1180,7 +1180,7 @@ entrypoint/certresolver names.
 
 **[VPS]** Exact mechanism per Hermes docs (https://hermes-agent.nousresearch.com/docs/) — Hermes supports "Connect any MCP server."
 
-- [ ] **Step 1: Add the MCP server to Hermes config**
+- [x] **Step 1: Add the MCP server to Hermes config**
 
 Point Hermes at the **internal** address (no TLS hop needed inside Docker). In Hermes' MCP configuration, add a streamable-http server:
 - URL: `http://openbrain-mcp:8080/mcp`
@@ -1190,7 +1190,7 @@ No `docker network connect` needed on Hermes' side: `openbrain-mcp` already join
 `hermes-agent-7qpk_default` network (declared as `hermes_net` in the compose file, Task 3.2), so
 Docker's embedded DNS resolves `openbrain-mcp` from inside the Hermes container out of the box.
 
-- [ ] **Step 2: Verify Hermes sees the tools**
+- [x] **Step 2: Verify Hermes sees the tools**
 
 Restart/reload Hermes, then:
 ```bash
@@ -1198,13 +1198,19 @@ docker exec -it $(docker ps --filter name=hermes --format '{{.Names}}' | head -1
 ```
 Expected: `save`, `search`, `list_recent`, `stats`, `delete`, `update` appear (names may be prefixed, e.g. `openbrain.save`).
 
+**Resolved 2026-07-17:** a direct `config.yaml` edit on the host did not survive a Hermes container
+restart (the Hostinger-managed image regenerates `mcp_servers` from another source of truth on
+boot — never fully root-caused). Switched to registering the server via Hermes' own `hermes mcp
+configure` flow inside the running container instead of hand-editing the file; confirmed with
+`hermes mcp catalog` showing `openbrain` enabled with all six tools selected.
+
 ### Task 5.2: Add the capture instruction/skill to Hermes
 
 **[VPS]** This tells Hermes what to do when you send content. Use the outcome of Task 0.1.
 
 Starting template: OB1's **Auto-Capture** skill pack (`/skills` in https://github.com/NateBJones-Projects/OB1) is a plain-text prompt pack for exactly this "notice content → capture it" behavior. Skim it and adapt its wording to the directive below (our tool is named `save`, not OB1's; keep it short).
 
-- [ ] **Step 1: Add a capture directive to Hermes' instructions/memory**
+- [x] **Step 1: Add a capture directive to Hermes' instructions/memory**
 
 Add to Hermes' system instruction (or a Hermes skill) text equivalent to:
 
@@ -1212,7 +1218,11 @@ Add to Hermes' system instruction (or a Hermes skill) text equivalent to:
 
 If Task 0.1 found Hermes cannot fetch links, change (1) to: "use the text I paste."
 
-- [ ] **Step 2: End-to-end capture test via WhatsApp**
+**Resolved 2026-07-17:** delivered via WhatsApp chat rather than a config-file edit, since the
+config-file route proved unreliable (see Task 5.1 note). Hermes saved the directive as a
+persistent Hermes "Skill" (`openbrain-capture`) from the chat instruction itself.
+
+- [x] **Step 2: End-to-end capture test via WhatsApp**
 
 Send a YouTube or Substack link (or text) to Hermes on WhatsApp.
 Expected: within seconds, a reply confirming a stored summary + ~5 keywords. Verify storage:
@@ -1225,10 +1235,19 @@ docker exec -it $(docker ps --filter name=openbrain-db --format '{{.Names}}') \
 ```
 Expected: row count incremented; latest `created_at` is just now.
 
-- [ ] **Step 3: End-to-end recall test via WhatsApp**
+**Resolved 2026-07-18:** sent a Substack link via WhatsApp (user-initiated). Hermes replied with a
+German summary + 5 keywords. `psql` confirmed the row: `source=substack`,
+`source_url=https://artificialcorner.substack.com/p/claude-file-system`, matching summary/keywords,
+`created_at` timestamped at send time.
+
+- [x] **Step 3: End-to-end recall test via WhatsApp**
 
 Ask Hermes (differently worded than the stored text) to recall the item.
 Expected: Hermes returns the captured summary via the `search` tool.
+
+**Resolved 2026-07-18:** asked Hermes to recall the note using different wording (no reuse of
+"Ordnersystem"/"Claude-Ergebnisse" from the original). Hermes returned the correct summary and
+source URL — confirms semantic search, not a keyword-string match.
 
 ---
 
