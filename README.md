@@ -22,7 +22,7 @@ infrastructure you already own.
 | 3 | Containerize (Dockerfile + Compose), verified end-to-end locally | ✅ Done |
 | 4 | Deploy behind Traefik on the real VPS | ✅ Done |
 | 5 | Wire Hermes-Agent to call `openbrain-mcp` | ✅ Done |
-| 6 | Connect Claude Desktop / Claude Code | ⬜ Not started |
+| 6 | Connect Claude Desktop / Claude Code | 🟨 Claude Code done, Desktop pending |
 | 7 | End-to-end acceptance on the real stack | ⬜ Not started |
 
 Full details, every design decision, and a running log of bugs found/fixed during implementation:
@@ -238,12 +238,23 @@ another source of truth on boot — not fully root-caused). Both the MCP registr
 capture directive ended up being set via Hermes' own in-container tooling (`hermes mcp configure`)
 and a WhatsApp chat instruction (saved as a Skill) instead of hand-edited config files.
 
-## The plan for Phase 6 (not yet executed)
+## Phase 6 — Laptop clients
 
 Independent of Phase 5 — it only needs Phase 4's public HTTPS endpoint, not Hermes.
 
-1. Add `https://<OPENBRAIN_HOST>/mcp` as a remote MCP server in Claude Desktop / Claude Code, same
-   bearer token.
+**Claude Code: done (2026-07-18).** Registered as a remote `http`-transport MCP server pointed at
+`https://<OPENBRAIN_HOST>/mcp` with the bearer token as a header. Getting there took real
+debugging: `claude mcp add`'s `--header` flag silently doesn't persist on Windows (CLI v2.1.214,
+both `http` and `stdio` transport) — it's accepted with no error, but the stored config ends up
+with no header at all, which later surfaces as a generic `-32000: Connection closed`. Confirmed via
+a direct authenticated HTTP request (bypassing the CLI) that the token/server/network were all
+fine, isolating the bug to the CLI's own header handling. Fixed by writing the `headers` field
+directly into `~/.claude.json` rather than going through `claude mcp add`. Full writeup in the
+plan's Task 6.2 resolution note.
+
+**Claude Desktop: not yet done.** Same idea — add `https://<OPENBRAIN_HOST>/mcp` as a remote MCP
+server with the bearer token — but not yet attempted; may hit the same header bug if Desktop shares
+config-handling code with the CLI, in which case the same direct-config-edit fix should apply.
 
 ## Using it
 
@@ -251,9 +262,9 @@ Independent of Phase 5 — it only needs Phase 4's public HTTPS endpoint, not He
   (summary + keywords), or that it was already saved if you sent the same link again. Later, ask
   Hermes to recall something — in different words than you sent it, even a different language —
   and it answers from what's stored.
-- **From Claude Desktop / Claude Code (once Phase 6 is live):** ask directly —
-  *"search my brain for the thing I saved about X"* — and it uses the same `search` tool over the
-  same database.
+- **From Claude Code (live):** ask directly — *"search my brain for the thing I saved about X"* —
+  and it uses the same `search` tool over the same database.
+- **From Claude Desktop (once set up):** same idea, once the remote MCP server is added there.
 
 ## Security model
 
