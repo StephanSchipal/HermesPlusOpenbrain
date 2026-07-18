@@ -1257,7 +1257,7 @@ source URL — confirms semantic search, not a keyword-string match.
 
 **[laptop]**
 
-- [ ] **Step 1: Add the remote MCP server**
+- [x] **Step 1: Add the remote MCP server**
 
 In Claude Desktop's MCP/connectors settings, add a remote (HTTP) MCP server:
 - URL: `https://<OPENBRAIN_HOST>/mcp`
@@ -1277,10 +1277,48 @@ In Claude Desktop's MCP/connectors settings, add a remote (HTTP) MCP server:
 ```
 )
 
-- [ ] **Step 2: Verify**
+- [x] **Step 2: Verify**
 
 Restart Claude Desktop; confirm the `openbrain` tools appear. Ask: *"Search my brain for the thing I saved about <topic>."*
 Expected: returns the capture from Phase 5.
+
+**Resolved 2026-07-18:** unlike Claude Code's `~/.claude.json`, this Claude Desktop version
+(`1.22209.0.0`) does **not** support a native `"type": "http"` entry in
+`claude_desktop_config.json` at all — writing one in directly (the fix that worked for Task 6.2)
+gets silently schema-rejected on the next launch with a "Some MCP servers could not be loaded...
+were skipped: openbrain" dialog, and the entry is pruned back out of `mcpServers`, which is also
+the real explanation for the config appearing to randomly "lose" the entry earlier in this session.
+Desktop only accepts the stdio shape (`command`/`args`/`env`, same as the pre-existing `freecad`
+entry), so the fix has to go through the `mcp-remote` bridge from Task 6.1's fallback snippet
+above — the same bridge that was tried and abandoned for Claude Code with an unexplained `-32000:
+Connection closed`. Root-caused this time via `mcp-remote`'s own docs/GitHub issues: on Windows,
+Claude Desktop mangles a CLI arg that contains a space inside it (e.g. `"Authorization: Bearer
+<token>"` passed as one `--header` argument), which is exactly the shape both Task 6.1's original
+snippet and the earlier abandoned attempt used. The documented workaround is to drop the space
+around the colon and move the actual secret into an environment variable referenced by
+`${VAR_NAME}` inside the header arg:
+```json
+{
+  "mcpServers": {
+    "openbrain": {
+      "command": "npx",
+      "args": ["mcp-remote", "https://<OPENBRAIN_HOST>/mcp",
+               "--transport", "http-only",
+               "--header", "Authorization:${AUTH_HEADER}"],
+      "env": { "AUTH_HEADER": "Bearer <OPENBRAIN_TOKEN>" }
+    }
+  }
+}
+```
+`--transport http-only` was added defensively to skip `mcp-remote`'s SSE-fallback probing, since
+the server is known (from Task 6.2) to only speak streamable HTTP. Config was hand-written via the
+same PowerShell read-modify-write pattern as Task 6.2 (`ConvertFrom-Json`/`ConvertTo-Json`, plus
+`[System.IO.File]::WriteAllText(...,  UTF8Encoding($false))` instead of `Set-Content -Encoding
+utf8`, since the latter writes a BOM that Electron/Node's `JSON.parse()` rejects — a second,
+independent bug hit mid-session that produced a "Could not load app settings — not valid JSON"
+dialog). Confirmed working after a full restart. Note for future reference: `claude mcp add
+--header` (Task 6.2's root cause) and this Windows arg-space bug are two *different* bugs that
+happened to produce the same symptom (`-32000: Connection closed`) on two different clients.
 
 ### Task 6.2: Claude Code
 
