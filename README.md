@@ -32,21 +32,46 @@ Full details, every design decision, and a running log of bugs found/fixed durin
 ## Architecture
 
 ```
-                      WhatsApp
-                         │
+          WhatsApp                      Phone call
+          │                             │
+          │                             ▼
+          │                             Twilio (PSTN, inbound)
+          │                             │  POST /voice/inbound
+          │                             ▼
+          │                             Traefik (host net, file-provider /voice/*)
+          │                             │  http://<bridge-ip>:8765
+          ▼                             ▼
+   ┌────────────────────────────────────────────┐
+   │           hermes-agent container           │
+   │  WhatsApp bot (existing)                   │
+   │  Voice server (FastAPI, port 8765)         │
+   │    STT: Twilio speech recognition (de-DE)  │
+   │    TTS: edge-tts (de-AT-JonasNeural)       │
+   └────────────────────────────────────────────┘
+                         │  MCP (internal Docker network)
+                         │  http://openbrain-mcp:8080/mcp
+                         │  Authorization: Bearer <token>
                          ▼
-   ┌─────────────┐   MCP (internal Docker network)   ┌──────────────┐      ┌────────────┐
-   │ hermes-agent │ ───────────────────────────────▶ │ openbrain-mcp │ ───▶ │ openbrain-db │
-   │  (existing)  │  http://openbrain-mcp:8080/mcp    │   (Python)    │      │ Postgres 16  │
-   └─────────────┘   Authorization: Bearer <token>    └──────┬───────┘      │  + pgvector  │
-                                                               │             └────────────┘
-                          Traefik (HTTPS, host network)        │
-                     brain.<vps-host>.hstgr.cloud   ◀──────────┘
-                                 ▲
-                                 │  Authorization: Bearer <token>
-                         Claude Desktop / Claude Code
-                              (laptop, remote MCP)
+                                               ┌──────────────┐      ┌────────────┐
+                                               │ openbrain-mcp │ ───▶ │ openbrain-db │
+                                               │   (Python)    │      │ Postgres 16  │
+                                               └──────┬───────┘      │  + pgvector  │
+                                                      │              └────────────┘
+                      Traefik (HTTPS, Docker-label route, host network)
+                brain.<vps-host>.hstgr.cloud   ◀──────┘
+                ▲
+                │  Authorization: Bearer <token>
+                Claude Desktop / Claude Code
+                     (laptop, remote MCP)
 ```
+
+The `hermes-agent` container runs two independent processes: the existing WhatsApp bot, and a
+FastAPI voice server (port 8765) added for Twilio inbound calls. Both drive the same underlying
+Hermes agent and can both call `openbrain-mcp` over the shared internal Docker network. Traefik
+fronts both entry points — WhatsApp doesn't go through Traefik at all (it's driven by the bot's own
+outbound connection to WhatsApp), while the phone call and the `openbrain-mcp`/laptop-client
+traffic each reach Traefik via a different provider (file-provider route for `/voice/*`,
+Docker-label route for `brain.<vps-host>.hstgr.cloud`). Full Twilio details: [`TwilioDocu.md`](TwilioDocu.md).
 
 Two new containers join the existing `hermes-agent` + `traefik` stack:
 
