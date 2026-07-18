@@ -1286,19 +1286,49 @@ Expected: returns the capture from Phase 5.
 
 **[laptop]**
 
-- [ ] **Step 1: Add the server**
+- [x] **Step 1: Add the server**
 
 ```bash
 claude mcp add --transport http openbrain https://<OPENBRAIN_HOST>/mcp \
   --header "Authorization: Bearer <OPENBRAIN_TOKEN>"
 ```
 
-- [ ] **Step 2: Verify**
+- [x] **Step 2: Verify**
 
 ```bash
 claude mcp list
 ```
 Expected: `openbrain` listed and reachable. In a session, the `save`/`search` tools are available.
+
+**Resolved 2026-07-18:** the `--header`/`-H` flag documented above does not actually persist for
+either `http` or `stdio` transport in Claude Code CLI v2.1.214 (Windows) — `claude mcp add` accepts
+it silently (no error) but the stored `~/.claude.json` entry ends up with no `headers` field at
+all, which surfaces later as a generic `-32000: Connection closed` / "Failed to connect" with no
+useful error message. Root-caused by comparing the stored config (`claude mcp get openbrain`)
+against a manually-tested, independently-working `Invoke-WebRequest` call with the same token —
+the direct HTTP call succeeded, proving the token/server/network were fine and isolating the bug to
+the CLI's own header handling. `claude mcp add-json` was also tried as a workaround but hit its own
+Windows argv-quoting issue passing a quote-heavy JSON string as a CLI argument (the same class of
+bug that broke a `curl.exe -d '<json>'` test earlier in this debugging session). Fixed by writing
+the `mcpServers.openbrain` entry directly into `~/.claude.json` via PowerShell's own
+`ConvertFrom-Json`/`ConvertTo-Json` cmdlets (no external process, so no argv-quoting risk), using
+the plain `http` transport shape with an explicit `headers` object:
+```json
+{
+  "type": "http",
+  "url": "https://<OPENBRAIN_HOST>/mcp",
+  "headers": { "Authorization": "Bearer <OPENBRAIN_TOKEN>" }
+}
+```
+An `mcp-remote` stdio-bridge workaround (per Task 6.1's fallback) was also tried and independently
+confirmed to work when run standalone, but consistently failed with the same `-32000` when spawned
+by Claude Code itself, for reasons not fully isolated (tried plain `npx`, global-installed
+`mcp-remote`, `cmd /c` wrapping, and `--silent` — none fixed it) — abandoned once the direct-`http`
++ hand-edited-`headers` approach worked. Verified via `claude --debug` → `/mcp` → `openbrain` →
+"Reconnect": `✔ connected`, `✔ authenticated`, 6 tools. Confirmed working end-to-end in a live
+session (tools listed, `search` tool used successfully). If Claude Desktop's own header handling
+(Task 6.1) turns out to have the same bug, the same direct-file-edit fix should apply to whatever
+config file Desktop reads.
 
 ---
 
