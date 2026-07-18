@@ -22,7 +22,7 @@ infrastructure you already own.
 | 3 | Containerize (Dockerfile + Compose), verified end-to-end locally | ✅ Done |
 | 4 | Deploy behind Traefik on the real VPS | ✅ Done |
 | 5 | Wire Hermes-Agent to call `openbrain-mcp` | ✅ Done |
-| 6 | Connect Claude Desktop / Claude Code | 🟨 Claude Code done, Desktop pending |
+| 6 | Connect Claude Desktop / Claude Code | ✅ Done |
 | 7 | End-to-end acceptance on the real stack | ⬜ Not started |
 
 Full details, every design decision, and a running log of bugs found/fixed during implementation:
@@ -252,9 +252,16 @@ fine, isolating the bug to the CLI's own header handling. Fixed by writing the `
 directly into `~/.claude.json` rather than going through `claude mcp add`. Full writeup in the
 plan's Task 6.2 resolution note.
 
-**Claude Desktop: not yet done.** Same idea — add `https://<OPENBRAIN_HOST>/mcp` as a remote MCP
-server with the bearer token — but not yet attempted; may hit the same header bug if Desktop shares
-config-handling code with the CLI, in which case the same direct-config-edit fix should apply.
+**Claude Desktop: done (2026-07-18).** Took a different fix than Claude Code, because this Desktop
+version doesn't support Claude Code's native `"type": "http"` config shape at all — it silently
+schema-rejects and prunes it, which was the real reason the config kept appearing to "lose" its
+`openbrain` entry earlier. Desktop only accepts the stdio config shape, so the fix goes through the
+`mcp-remote` bridge, combined with a Windows-specific fix: `mcp-remote` mangles a `--header` value
+that contains a space (e.g. `"Authorization: Bearer <token>"`), so the token has to live in an
+environment variable referenced as `${AUTH_HEADER}` inside a space-free header arg
+(`Authorization:${AUTH_HEADER}`). A second, unrelated bug (`Set-Content -Encoding utf8` writing a
+BOM that Desktop's JSON parser rejects) also had to be fixed by writing the config file with
+`[System.IO.File]::WriteAllText(...)` instead. Full writeup in the plan's Task 6.1 resolution note.
 
 ## Using it
 
@@ -264,7 +271,8 @@ config-handling code with the CLI, in which case the same direct-config-edit fix
   and it answers from what's stored.
 - **From Claude Code (live):** ask directly — *"search my brain for the thing I saved about X"* —
   and it uses the same `search` tool over the same database.
-- **From Claude Desktop (once set up):** same idea, once the remote MCP server is added there.
+- **From Claude Desktop (live):** same idea, using the `mcp-remote` stdio bridge instead of a
+  native remote entry.
 
 ## Security model
 
