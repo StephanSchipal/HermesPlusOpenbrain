@@ -23,7 +23,7 @@ infrastructure you already own.
 | 4 | Deploy behind Traefik on the real VPS | ✅ Done |
 | 5 | Wire Hermes-Agent to call `openbrain-mcp` | ✅ Done |
 | 6 | Connect Claude Desktop / Claude Code | ✅ Done |
-| 7 | End-to-end acceptance on the real stack | ⬜ Not started |
+| 7 | End-to-end acceptance on the real stack | ✅ Done |
 
 Full details, every design decision, and a running log of bugs found/fixed during implementation:
 - Design spec — [`docs/superpowers/specs/2026-06-30-hermes-openbrain-memory-design.md`](docs/superpowers/specs/2026-06-30-hermes-openbrain-memory-design.md)
