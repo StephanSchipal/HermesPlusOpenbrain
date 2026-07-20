@@ -62,6 +62,13 @@ def update(id: str, summary: str | None = None, keywords: list[str] | None = Non
         return {"id": id, "updated": store.update_capture(
             conn, capture_id=id, summary=summary, keywords=keywords, metadata=metadata)}
 
+@mcp.tool()
+def find_near_duplicates(threshold: float = 0.95, limit: int = 50) -> list[dict]:
+    """Find near-duplicate capture pairs by embedding similarity (cosine).
+    Read-only -- use the existing `delete` tool to remove one side of a pair."""
+    with get_conn() as conn:
+        return store.find_near_duplicates(conn, threshold=threshold, limit=limit)
+
 class BearerAuthMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         if request.url.path == "/health":
