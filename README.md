@@ -140,7 +140,7 @@ openbrain-mcp/
     fingerprint.py   # content_fingerprint() — SHA-256 dedup key
     embeddings.py     # e5 model wrapper (passage:/query: prefixes)
     db.py              # get_conn() — psycopg + pgvector registration
-    store.py            # save/search/recent/stats/delete/update — the only file with SQL
+    store.py            # save/search/recent/stats/delete/update/find_near_duplicates — the only file with SQL
     server.py             # the 7 MCP tools + bearer auth + /health
   migrations/001_init.sql   # schema
   tests/                     # 21 tests, pytest
