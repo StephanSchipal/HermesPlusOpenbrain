@@ -79,7 +79,7 @@ Two new containers join the existing `hermes-agent` + `traefik` stack:
   published, never on Hermes' network — reachable only from `openbrain-mcp`, enforced at the
   Docker network layer (not just by convention).
 - **`openbrain-mcp`** — a small Python service. Loads a local multilingual sentence-embedding
-  model once (`intfloat/multilingual-e5-small`, 384-dim) and exposes six tools over the
+  model once (`intfloat/multilingual-e5-small`, 384-dim) and exposes seven tools over the
   [Model Context Protocol](https://modelcontextprotocol.io) (Streamable HTTP transport). Sits on
   *two* Docker networks: `openbrain_internal` (talks to the db) and Hermes' own network (so Hermes
   can call it by container name), and is fronted by Traefik for TLS + remote laptop access.
@@ -141,9 +141,9 @@ openbrain-mcp/
     embeddings.py     # e5 model wrapper (passage:/query: prefixes)
     db.py              # get_conn() — psycopg + pgvector registration
     store.py            # save/search/recent/stats/delete/update — the only file with SQL
-    server.py             # the 6 MCP tools + bearer auth + /health
+    server.py             # the 7 MCP tools + bearer auth + /health
   migrations/001_init.sql   # schema
-  tests/                     # 18 tests, pytest
+  tests/                     # 21 tests, pytest
   Dockerfile
   pyproject.toml
 deploy/
@@ -188,7 +188,7 @@ curl -H "Authorization: Bearer <your token>" http://localhost:8080/mcp     # MCP
 ```
 
 Any MCP client (the `mcp` Python SDK, Claude Desktop, Claude Code) can connect to
-`http://localhost:8080/mcp` with that bearer token and call the six tools directly — useful for
+`http://localhost:8080/mcp` with that bearer token and call the seven tools directly — useful for
 testing before Hermes/laptop wiring exists (Phases 5-6).
 
 Run the test suite against a live database:
