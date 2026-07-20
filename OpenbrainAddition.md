@@ -66,7 +66,7 @@ Capture-Kanal dient **WhatsApp**, statt Supabase Edge Functions ein
 - `openbrain-mcp`: Python-Service mit lokalem Embedding-Modell
   (`intfloat/multilingual-e5-small`), Bearer-Token-Auth, hinter Traefik/TLS
 
-**Die 6 bestehenden MCP-Tools**
+**Die 7 bestehenden MCP-Tools**
 (`openbrain-mcp/app/server.py`, delegiert an `openbrain-mcp/app/store.py`):
 
 | Tool | Funktion |
@@ -77,6 +77,7 @@ Capture-Kanal dient **WhatsApp**, statt Supabase Edge Functions ein
 | `stats` | Zählungen nach Quelle, Zeitspanne |
 | `delete` | Fehlerhafte Einträge entfernen |
 | `update` | Bearbeiten, re-embedded bei Summary-Änderung |
+| `find_near_duplicates(threshold=0.95, limit=50)` | **Neu (2026-07-20).** Read-only: findet Notizpaare mit sehr ähnlicher Bedeutung per Embedding-Kosinus-Ähnlichkeit — ergänzt den exakten Fingerprint-Dedup aus `save` um Fälle mit unterschiedlicher Formulierung |
 
 **Aktueller Stand** (laut `README.md`): System **komplett fertig und live**
 (Phase 0–7 alle ✅) — auf dem VPS hinter Traefik mit echtem HTTPS deployt,
@@ -209,24 +210,30 @@ URL-Duplikate werden also gar nicht erst eingebettet.
 "Finde die Notiz zu dem Substack-Artikel über Prompt Engineering."
 ```
 
-### Duplikatserkennung per Embedding-Ähnlichkeit (noch zu bauen)
+### Duplikatserkennung per Embedding-Ähnlichkeit (existiert bereits — `find_near_duplicates`)
 
 Fingerprint fängt nur *exakte* Duplikate. Zwei Notizen mit demselben Inhalt
-in leicht anderen Worten rutschen durch. Prompt an Claude Code:
+in leicht anderen Worten rutschen durch — dafür gibt es jetzt ein eigenes,
+read-only Tool. Endnutzer-Prompt, wörtlich so an Claude Code/Desktop:
 
 ```
-"Schreib ein Script, das in der captures-Tabelle Paare mit Kosinus-Ähnlichkeit
-über 0.95 findet (embedding <=> embedding), sie mir mit Summary und Score
-auflistet, und mich vor jedem Löschen fragt, welchen der beiden ich behalten
-will."
+"Nutze openbrains find_near_duplicates-Tool und sag mir, welche Notizen
+sich inhaltlich überschneiden."
+"Finde Notizpaare mit mindestens 90% Ähnlichkeit in meinem Brain."
 ```
-Umsetzung sinngemäß:
+Beispielergebnis (real gegen die Testdatenbank verifiziert): zwei Notizen
+"Sarah is considering leaving her job to start a consulting **business**."
+und "...to start a consulting **company**." wurden mit Similarity `0.997`
+als Paar gefunden — das Tool selbst mutiert nichts, Aufräumen erfolgt
+weiterhin über das bestehende `delete`-Tool.
+
+Umsetzung (`openbrain-mcp/app/store.py`):
 ```sql
 SELECT a.id, a.summary, b.id, b.summary,
        1 - (a.embedding <=> b.embedding) AS similarity
 FROM captures a JOIN captures b ON a.id < b.id
-WHERE 1 - (a.embedding <=> b.embedding) > 0.95
-ORDER BY similarity DESC;
+WHERE 1 - (a.embedding <=> b.embedding) > %s   -- Standard-Threshold: 0.95
+ORDER BY similarity DESC LIMIT %s;             -- Standard-Limit: 50
 ```
 
 ### Clustering (noch zu bauen)
@@ -265,17 +272,21 @@ Mehrheits-Kategorie."
 > Variante (a) braucht es zusätzlich ein `get-by-id`- oder ein erweitertes
 > `search`-Tool, das `metadata` mit ausliest.
 
-## 8. Geplante Erweiterungen (nächster Schritt)
+## 8. Erweiterungen — Status
 
 Vier Fähigkeiten, die als neue MCP-Tools nach dem bestehenden Muster
-(`store.py` + `server.py` + Tests) in `openbrain-mcp` eingebaut werden
-sollen:
+(`store.py` + `server.py` + Tests) in `openbrain-mcp` eingebaut werden:
 
-1. Embedding-basierte Duplikatserkennung (über den exakten Fingerprint
-   hinaus)
-2. Expliziter Fingerprint-/Duplikat-Check als eigenständiges Tool
-3. Clustering
-4. Klassifikation (inkl. Rücklesen von `metadata`)
+1. ✅ **Embedding-basierte Duplikatserkennung** (`find_near_duplicates`) —
+   fertig, gemergt auf `main` am 2026-07-20. Spec:
+   [`docs/superpowers/specs/2026-07-20-openbrain-duplicate-detection-design.md`](docs/superpowers/specs/2026-07-20-openbrain-duplicate-detection-design.md),
+   Plan:
+   [`docs/superpowers/plans/2026-07-20-openbrain-duplicate-detection.md`](docs/superpowers/plans/2026-07-20-openbrain-duplicate-detection.md).
+   21/21 Tests grün, End-to-End-Smoke-Test gegen einen echten lokalen
+   Docker-Compose-Stack verifiziert.
+2. ⏳ Expliziter Fingerprint-/Duplikat-Check als eigenständiges Tool
+3. ⏳ Clustering
+4. ⏳ Klassifikation (inkl. Rücklesen von `metadata`)
 
-Details und Fortschritt siehe die jeweiligen Spec-/Plan-Dokumente unter
-`docs/superpowers/`.
+Details und Fortschritt zu den noch offenen Punkten siehe die jeweiligen
+Spec-/Plan-Dokumente unter `docs/superpowers/`, sobald sie angelegt sind.
