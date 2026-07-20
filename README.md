@@ -112,7 +112,7 @@ Sending the same link twice (WhatsApp forwards routinely carry different trackin
 e.g. YouTube's `?si=`) is deduped via `fingerprint` — the second send returns the existing row
 instead of creating a duplicate.
 
-## The six MCP tools
+## The seven MCP tools
 
 Implemented in [`openbrain-mcp/app/server.py`](openbrain-mcp/app/server.py), delegating to
 [`openbrain-mcp/app/store.py`](openbrain-mcp/app/store.py):
@@ -125,9 +125,10 @@ Implemented in [`openbrain-mcp/app/server.py`](openbrain-mcp/app/server.py), del
 | `stats()` | Total captures, counts by source, first/last capture timestamp. |
 | `delete(id)` | Remove a capture (prune a mis-capture). |
 | `update(id, summary?, keywords?, metadata?)` | Edit a capture. Changing `summary` re-embeds it. `metadata` is a full replace, not a merge. |
+| `find_near_duplicates(threshold=0.95, limit=50)` | Read-only. Lists capture pairs whose summaries are near-duplicates by embedding cosine similarity — catches near-duplicates the exact-fingerprint dedup in `save` misses. Delete one side of a pair via the existing `delete` tool. |
 
 All except `save`/`update`'s pass-through of `metadata` are exercised by the test suite
-(`openbrain-mcp/tests/`, 18 tests, run against a real Postgres+pgvector instance).
+(`openbrain-mcp/tests/`, 21 tests, run against a real Postgres+pgvector instance).
 
 ## Repository layout
 
