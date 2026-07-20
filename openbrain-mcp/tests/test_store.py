@@ -81,3 +81,49 @@ def test_update_changes_summary_and_reembeds():
     with get_conn() as conn:
         hits = store.search_captures(conn, query="notes about the universe and stars", k=1)
     assert hits and hits[0]["id"] == r["id"]  # re-embedding took effect
+
+def test_find_near_duplicates_detects_similar_but_not_identical_summaries():
+    _clean()
+    with get_conn() as conn:
+        store.save_capture(conn, raw_text="a",
+                           summary="Sarah is considering leaving her job to start a consulting business.",
+                           keywords=["career"], source="other")
+        store.save_capture(conn, raw_text="b",
+                           summary="Sarah is considering leaving her job to start a consulting company.",
+                           keywords=["career"], source="other")
+        store.save_capture(conn, raw_text="c", summary="A recipe for sourdough bread.",
+                           keywords=["cooking"], source="other")
+    with get_conn() as conn:
+        pairs = store.find_near_duplicates(conn, limit=10)  # default threshold: 0.95
+    assert len(pairs) == 1, f"expected exactly the Sarah/Sarah pair, got {pairs}"
+    top = pairs[0]
+    assert "sourdough" not in top["summary_a"] and "sourdough" not in top["summary_b"]
+    assert "Sarah" in top["summary_a"] and "Sarah" in top["summary_b"]
+    assert 0.95 < top["similarity"] <= 1.0
+
+def test_find_near_duplicates_respects_threshold():
+    _clean()
+    with get_conn() as conn:
+        store.save_capture(conn, raw_text="a", summary="A talk about memory systems.",
+                           keywords=["memory"], source="other")
+        store.save_capture(conn, raw_text="b", summary="A recipe for sourdough bread.",
+                           keywords=["cooking"], source="other")
+    with get_conn() as conn:
+        # cosine similarity is capped at 1.0 -- no pair can ever clear this bar
+        pairs = store.find_near_duplicates(conn, threshold=1.01, limit=10)
+    assert pairs == []
+
+def test_find_near_duplicates_respects_limit():
+    _clean()
+    with get_conn() as conn:
+        for i in range(4):
+            store.save_capture(
+                conn, raw_text=f"t{i}",
+                summary="Meeting notes: discussed the Q3 budget with the finance team.",
+                keywords=["meeting"], source="other",
+                source_url=f"https://example.com/meeting-{i}",
+            )
+    with get_conn() as conn:
+        # 4 identical-summary captures -> C(4,2) = 6 qualifying pairs at threshold 0.0
+        pairs = store.find_near_duplicates(conn, threshold=0.0, limit=3)
+    assert len(pairs) == 3
