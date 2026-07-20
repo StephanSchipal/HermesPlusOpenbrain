@@ -60,6 +60,30 @@ def search_captures(conn: psycopg.Connection, *, query: str, k: int = 5) -> list
         rows = cur.fetchall()
     return [_row_to_result(r) for r in rows]
 
+def find_near_duplicates(conn: psycopg.Connection, *, threshold: float = 0.95,
+                         limit: int = 50) -> list[dict]:
+    """Pairs of captures whose summaries are near-duplicates by cosine similarity.
+    Read-only -- caller decides what to do (e.g. the existing `delete` tool)."""
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT a.id, a.summary, b.id, b.summary,
+                   1 - (a.embedding <=> b.embedding) AS similarity
+            FROM captures a
+            JOIN captures b ON a.id < b.id
+            WHERE 1 - (a.embedding <=> b.embedding) > %s
+            ORDER BY similarity DESC
+            LIMIT %s
+            """,
+            (threshold, limit),
+        )
+        rows = cur.fetchall()
+    return [
+        {"id_a": str(r[0]), "summary_a": r[1], "id_b": str(r[2]), "summary_b": r[3],
+         "similarity": float(r[4])}
+        for r in rows
+    ]
+
 def fetch_recent(conn: psycopg.Connection, *, n: int = 10) -> list[dict]:
     with conn.cursor() as cur:
         cur.execute(
