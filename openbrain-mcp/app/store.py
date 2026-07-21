@@ -1,9 +1,14 @@
 # app/store.py
 import psycopg
 from psycopg.types.json import Json
+from sklearn.cluster import KMeans
+from sklearn.metrics import silhouette_score
 from app.keywords import normalize_keywords
 from app.embeddings import embed_passage, embed_query
 from app.fingerprint import content_fingerprint
+
+_MIN_CAPTURES_TO_CLUSTER = 4
+_MAX_AUTO_K = 10
 
 def save_capture(conn: psycopg.Connection, *, raw_text: str, summary: str,
                  keywords: list[str], source: str | None = None,
@@ -83,6 +88,55 @@ def find_near_duplicates(conn: psycopg.Connection, *, threshold: float = 0.95,
          "similarity": float(r[4])}
         for r in rows
     ]
+
+def cluster_captures(conn: psycopg.Connection, *, k: int | None = None) -> dict:
+    """Group all captures into k thematic clusters by embedding similarity.
+    Read-only -- returns cluster membership and which entries are most
+    representative of each cluster; does not generate cluster labels itself
+    (leaves that to the calling LLM client) and writes nothing to the DB."""
+    with conn.cursor() as cur:
+        cur.execute("SELECT id, summary, embedding FROM captures")
+        rows = cur.fetchall()
+
+    if len(rows) < _MIN_CAPTURES_TO_CLUSTER:
+        return {"error": f"need at least {_MIN_CAPTURES_TO_CLUSTER} captures to cluster, have {len(rows)}"}
+
+    if k is not None and not (1 <= k <= len(rows)):
+        return {"error": f"k must be between 1 and {len(rows)}, got {k}"}
+
+    ids = [str(r[0]) for r in rows]
+    summaries = [r[1] for r in rows]
+    embeddings = [r[2].to_list() for r in rows]  # pgvector Vector -> plain list for sklearn
+
+    if k is None:
+        k = _auto_select_k(embeddings)
+
+    model = KMeans(n_clusters=k, random_state=0, n_init=10).fit(embeddings)
+    distances = model.transform(embeddings)  # shape (n, k): distance to every centroid
+
+    clusters = []
+    for cluster_id in range(k):
+        member_indices = [i for i, label in enumerate(model.labels_) if label == cluster_id]
+        member_indices.sort(key=lambda i: distances[i][cluster_id])  # nearest-to-centroid first
+        central_ids = {ids[i] for i in member_indices[:3]}
+        members = [
+            {"id": ids[i], "summary": summaries[i], "central": ids[i] in central_ids}
+            for i in member_indices
+        ]
+        clusters.append({"cluster_id": cluster_id, "size": len(members), "members": members})
+
+    return {"k": k, "clusters": clusters}
+
+def _auto_select_k(embeddings: list[list[float]], max_k: int = _MAX_AUTO_K) -> int:
+    """Try k = 2..min(max_k, n-1) and return the k with the best silhouette score."""
+    upper = min(max_k, len(embeddings) - 1)
+    best_k, best_score = 2, -1.0
+    for candidate_k in range(2, upper + 1):
+        labels = KMeans(n_clusters=candidate_k, random_state=0, n_init=10).fit_predict(embeddings)
+        score = silhouette_score(embeddings, labels)
+        if score > best_score:
+            best_k, best_score = candidate_k, score
+    return best_k
 
 def fetch_recent(conn: psycopg.Connection, *, n: int = 10) -> list[dict]:
     with conn.cursor() as cur:
