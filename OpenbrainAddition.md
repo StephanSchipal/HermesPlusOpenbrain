@@ -66,7 +66,7 @@ Capture-Kanal dient **WhatsApp**, statt Supabase Edge Functions ein
 - `openbrain-mcp`: Python-Service mit lokalem Embedding-Modell
   (`intfloat/multilingual-e5-small`), Bearer-Token-Auth, hinter Traefik/TLS
 
-**Die 7 bestehenden MCP-Tools**
+**Die 8 bestehenden MCP-Tools**
 (`openbrain-mcp/app/server.py`, delegiert an `openbrain-mcp/app/store.py`):
 
 | Tool | Funktion |
@@ -78,6 +78,7 @@ Capture-Kanal dient **WhatsApp**, statt Supabase Edge Functions ein
 | `delete` | Fehlerhafte Einträge entfernen |
 | `update` | Bearbeiten, re-embedded bei Summary-Änderung |
 | `find_near_duplicates(threshold=0.95, limit=50)` | **Neu (2026-07-20).** Read-only: findet Notizpaare mit sehr ähnlicher Bedeutung per Embedding-Kosinus-Ähnlichkeit — ergänzt den exakten Fingerprint-Dedup aus `save` um Fälle mit unterschiedlicher Formulierung |
+| `compute_fingerprint(raw_text, source_url?)` | **Neu (2026-07-21).** Read-only, kein DB-Zugriff: zeigt den SHA-256-Fingerprint, den `save` für diese Eingabe berechnen würde, plus die normalisierte Zeichenkette dahinter — zum Nachvollziehen/Debuggen des Fingerprint-Mechanismus, kein Duplikat-Check gegen bestehende Einträge |
 
 **Aktueller Stand** (laut `README.md`): System **komplett fertig und live**
 (Phase 0–7 alle ✅) — auf dem VPS hinter Traefik mit echtem HTTPS deployt,
@@ -236,6 +237,42 @@ WHERE 1 - (a.embedding <=> b.embedding) > %s   -- Standard-Threshold: 0.95
 ORDER BY similarity DESC LIMIT %s;             -- Standard-Limit: 50
 ```
 
+### Expliziter Fingerprint-Check (existiert bereits — `compute_fingerprint`)
+
+`save` dedupliziert automatisch und lautlos per Fingerprint — man sieht nie,
+*welcher* Hash oder *welche* normalisierte Zeichenkette dahintersteckt. Für
+Debugging/Nachvollziehbarkeit gibt es jetzt ein separates, rein rechnendes
+Tool ganz ohne DB-Zugriff. Endnutzer-Prompt, wörtlich so an Claude Code/
+Desktop:
+
+```
+"Nutze openbrains compute_fingerprint-Tool und zeig mir, welchen Fingerprint
+https://www.youtube.com/watch?v=abc123 ergibt."
+"Warum werden diese zwei URLs als dasselbe erkannt? Berechne beide
+Fingerprints und vergleiche die normalisierte Basis."
+```
+Beispielergebnis (real gegen den lokalen Compose-Stack verifiziert):
+`compute_fingerprint(source_url="https://www.Example.com/Page/")` liefert
+`{"fingerprint": "d641f3ec...", "normalized_basis": "example.com/page",
+"basis_source": "url"}` — man sieht direkt, dass `www.`, Groß-/
+Kleinschreibung und der abschließende Slash vor dem Hashen entfernt wurden.
+Ohne `source_url` fällt das Tool auf normalisierten Text zurück
+(`basis_source: "text"`).
+
+Umsetzung (`openbrain-mcp/app/fingerprint.py`):
+```python
+def content_fingerprint_debug(*, source_url: str | None, raw_text: str) -> dict:
+    basis, source = _compute_basis(source_url=source_url, raw_text=raw_text)
+    return {
+        "fingerprint": hashlib.sha256(basis.encode("utf-8")).hexdigest(),
+        "normalized_basis": basis,
+        "basis_source": source,
+    }
+```
+Bewusst **kein** Duplikat-Check gegen die Datenbank — dafür gibt es bereits
+`save` (automatisch) und `find_near_duplicates` (Embedding-basiert). Dieses
+Tool beantwortet nur "welcher Hash, und warum", nicht "gibt's das schon".
+
 ### Clustering (noch zu bauen)
 
 Themen automatisch gruppieren, ohne sie vorher zu definieren:
@@ -284,7 +321,16 @@ Vier Fähigkeiten, die als neue MCP-Tools nach dem bestehenden Muster
    [`docs/superpowers/plans/2026-07-20-openbrain-duplicate-detection.md`](docs/superpowers/plans/2026-07-20-openbrain-duplicate-detection.md).
    21/21 Tests grün, End-to-End-Smoke-Test gegen einen echten lokalen
    Docker-Compose-Stack verifiziert.
-2. ⏳ Expliziter Fingerprint-/Duplikat-Check als eigenständiges Tool
+2. ✅ **Expliziter Fingerprint-Check** (`compute_fingerprint`) — fertig,
+   gemergt auf `main` am 2026-07-21. Spec:
+   [`docs/superpowers/specs/2026-07-21-openbrain-fingerprint-debug-design.md`](docs/superpowers/specs/2026-07-21-openbrain-fingerprint-debug-design.md),
+   Plan:
+   [`docs/superpowers/plans/2026-07-21-openbrain-fingerprint-debug.md`](docs/superpowers/plans/2026-07-21-openbrain-fingerprint-debug.md).
+   24/24 Tests grün (die 3 neuen Tests brauchen keine Datenbank), End-to-End-
+   Smoke-Test gegen einen echten lokalen Docker-Compose-Stack verifiziert.
+   Bewusste Abweichung vom `server.py`→`store.py`-Muster der anderen sieben
+   Tools: `compute_fingerprint` ruft `content_fingerprint_debug` direkt auf,
+   da kein DB-Zugriff nötig ist.
 3. ⏳ Clustering
 4. ⏳ Klassifikation (inkl. Rücklesen von `metadata`)
 
