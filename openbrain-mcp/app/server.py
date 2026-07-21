@@ -87,7 +87,9 @@ def cluster_captures(k: int | None = None) -> dict:
     automatically via silhouette score. Returns each cluster's full
     membership (id + summary), with a `central` flag marking the 3 entries
     closest to that cluster's centroid -- use those to label the cluster's
-    theme, since this tool does not generate labels itself."""
+    theme, since this tool does not generate labels itself. k must be
+    between 1 and the total capture count, or omitted; too few captures
+    overall (fewer than 4) also returns an error dict instead of raising."""
     with get_conn() as conn:
         return store.cluster_captures(conn, k=k)
 
