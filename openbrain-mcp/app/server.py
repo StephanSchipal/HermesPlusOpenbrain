@@ -76,6 +76,8 @@ def compute_fingerprint(raw_text: str, source_url: str | None = None) -> dict:
     normalized string it's based on. Read-only, no DB access -- does not check
     whether this fingerprint already exists (use `save` or `find_near_duplicates`
     for that)."""
+    # No get_conn()/store.py here (unlike the other tools above) -- this
+    # computation is pure and needs no DB access.
     return content_fingerprint_debug(source_url=source_url, raw_text=raw_text)
 
 class BearerAuthMiddleware(BaseHTTPMiddleware):
