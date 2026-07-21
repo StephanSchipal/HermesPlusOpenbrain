@@ -127,3 +127,98 @@ def test_find_near_duplicates_respects_limit():
         # 4 identical-summary captures -> C(4,2) = 6 qualifying pairs at threshold 0.0
         pairs = store.find_near_duplicates(conn, threshold=0.0, limit=3)
     assert len(pairs) == 3
+
+_CLUSTER_TOPICS = {
+    "career": [
+        "Sarah is considering leaving her job to start a consulting business.",
+        "Sarah is considering leaving her job to start a consulting company.",
+        "Sarah is considering leaving her job to start a consulting firm.",
+        "Sarah is considering leaving her job to start a consulting practice.",
+        "Sarah is considering leaving her job to start a consulting agency.",
+    ],
+    "cooking": [
+        "A recipe for sourdough bread using a rye starter.",
+        "A recipe for sourdough bread using a wheat starter.",
+        "A recipe for sourdough bread using a spelt starter.",
+        "A recipe for sourdough bread using an einkorn starter.",
+        "A recipe for sourdough bread using a kamut starter.",
+    ],
+    "meeting": [
+        "Meeting notes: discussed the Q3 budget with the finance team.",
+        "Meeting notes: discussed the Q3 forecast with the finance team.",
+        "Meeting notes: discussed the Q3 roadmap with the finance team.",
+        "Meeting notes: discussed the Q3 headcount with the finance team.",
+        "Meeting notes: discussed the Q3 timeline with the finance team.",
+    ],
+}
+
+def _save_topic_fixture() -> dict:
+    """Saves 15 captures (3 topics x 5 near-duplicate-worded captures each,
+    same 'vary one word' technique as the find_near_duplicates tests, to keep
+    within-topic similarity high and between-topic similarity low).
+    Returns {capture_id: topic_name}."""
+    id_to_topic = {}
+    with get_conn() as conn:
+        for topic, summaries in _CLUSTER_TOPICS.items():
+            for i, summary in enumerate(summaries):
+                r = store.save_capture(
+                    conn, raw_text=f"{topic}-{i}", summary=summary,
+                    keywords=[topic], source="other",
+                    source_url=f"https://example.com/{topic}-{i}",
+                )
+                id_to_topic[r["id"]] = topic
+    return id_to_topic
+
+def _assert_clusters_are_topic_pure(clusters, id_to_topic):
+    for cluster in clusters:
+        topics_in_cluster = {id_to_topic[m["id"]] for m in cluster["members"]}
+        assert len(topics_in_cluster) == 1, f"cluster mixed topics: {topics_in_cluster}"
+
+def test_cluster_captures_with_explicit_k_groups_by_theme():
+    _clean()
+    id_to_topic = _save_topic_fixture()
+    with get_conn() as conn:
+        result = store.cluster_captures(conn, k=3)
+    assert result["k"] == 3
+    assert len(result["clusters"]) == 3
+    for cluster in result["clusters"]:
+        assert cluster["size"] == 5
+    _assert_clusters_are_topic_pure(result["clusters"], id_to_topic)
+
+def test_cluster_captures_auto_k_picks_a_reasonable_cluster_count():
+    _clean()
+    id_to_topic = _save_topic_fixture()
+    with get_conn() as conn:
+        result = store.cluster_captures(conn)  # k=None -> auto via silhouette
+    assert 2 <= result["k"] <= 14
+    # Not asserting k == 3 exactly (would over-fit the test to this specific
+    # embedding model's silhouette behavior) -- but however many clusters it
+    # picked, each one must still be internally topic-pure. A sub-split of a
+    # single topic into 2 clusters is fine; a cluster mixing topics is not.
+    _assert_clusters_are_topic_pure(result["clusters"], id_to_topic)
+
+def test_cluster_captures_marks_up_to_three_members_central_per_cluster():
+    _clean()
+    _save_topic_fixture()
+    with get_conn() as conn:
+        result = store.cluster_captures(conn, k=3)
+    for cluster in result["clusters"]:
+        central = [m for m in cluster["members"] if m["central"]]
+        non_central = [m for m in cluster["members"] if not m["central"]]
+        # size 5 per cluster here -> exactly 3 central, 2 not (regression
+        # guard against "all members marked central" or "none marked" bugs;
+        # exact nearest-neighbor correctness is sklearn's own tested
+        # behavior via KMeans.transform(), not this project's to re-verify).
+        assert len(central) == min(3, cluster["size"])
+        assert len(non_central) == cluster["size"] - len(central)
+
+def test_cluster_captures_reports_error_below_minimum():
+    _clean()
+    with get_conn() as conn:
+        store.save_capture(conn, raw_text="a", summary="only one note",
+                           keywords=["x"], source="other")
+        store.save_capture(conn, raw_text="b", summary="only two notes",
+                           keywords=["x"], source="other")
+    with get_conn() as conn:
+        result = store.cluster_captures(conn)
+    assert result == {"error": "need at least 4 captures to cluster, have 2"}
