@@ -66,7 +66,7 @@ Capture-Kanal dient **WhatsApp**, statt Supabase Edge Functions ein
 - `openbrain-mcp`: Python-Service mit lokalem Embedding-Modell
   (`intfloat/multilingual-e5-small`), Bearer-Token-Auth, hinter Traefik/TLS
 
-**Die 8 bestehenden MCP-Tools**
+**Die 9 bestehenden MCP-Tools**
 (`openbrain-mcp/app/server.py`, delegiert an `openbrain-mcp/app/store.py`):
 
 | Tool | Funktion |
@@ -79,6 +79,7 @@ Capture-Kanal dient **WhatsApp**, statt Supabase Edge Functions ein
 | `update` | Bearbeiten, re-embedded bei Summary-Änderung |
 | `find_near_duplicates(threshold=0.95, limit=50)` | **Neu (2026-07-20).** Read-only: findet Notizpaare mit sehr ähnlicher Bedeutung per Embedding-Kosinus-Ähnlichkeit — ergänzt den exakten Fingerprint-Dedup aus `save` um Fälle mit unterschiedlicher Formulierung |
 | `compute_fingerprint(raw_text, source_url?)` | **Neu (2026-07-21).** Read-only, kein DB-Zugriff: zeigt den SHA-256-Fingerprint, den `save` für diese Eingabe berechnen würde, plus die normalisierte Zeichenkette dahinter — zum Nachvollziehen/Debuggen des Fingerprint-Mechanismus, kein Duplikat-Check gegen bestehende Einträge |
+| `cluster_captures(k?)` | **Neu (2026-07-21).** Read-only: gruppiert alle Notizen per k-Means nach Embedding-Ähnlichkeit in thematische Cluster — `k` optional, sonst automatisch per Silhouette-Score bestimmt. Gibt volle Cluster-Mitgliedschaft zurück, mit `central`-Flag für die (bis zu) 3 zentralsten Einträge je Cluster; die Themen-*Beschriftung* macht bewusst der aufrufende Client, nicht das Tool selbst |
 
 **Aktueller Stand** (laut `README.md`): System **komplett fertig und live**
 (Phase 0–7 alle ✅) — auf dem VPS hinter Traefik mit echtem HTTPS deployt,
@@ -273,18 +274,41 @@ Bewusst **kein** Duplikat-Check gegen die Datenbank — dafür gibt es bereits
 `save` (automatisch) und `find_near_duplicates` (Embedding-basiert). Dieses
 Tool beantwortet nur "welcher Hash, und warum", nicht "gibt's das schon".
 
-### Clustering (noch zu bauen)
+### Clustering (existiert bereits — `cluster_captures`)
 
-Themen automatisch gruppieren, ohne sie vorher zu definieren:
+Themen automatisch gruppieren, ohne sie vorher zu definieren. Das Tool selbst
+macht keine LLM-Aufrufe und beschriftet nichts — es liefert nur die
+Rohdaten (Cluster-Mitgliedschaft + die zentralsten Einträge je Cluster);
+die Themen-Beschriftung übernimmt der aufrufende Client (Claude Code/
+Desktop, Hermes), da der ja selbst ein LLM ist. Endnutzer-Prompt:
 
 ```
-"Lies alle embeddings + summaries aus captures, clustere sie mit k-means
-(k=8, oder automatisch per Silhouette-Score bestimmt), und gib mir pro
-Cluster eine kurze Themen-Beschriftung plus die 3 zentralsten Einträge."
+"Nutze openbrains cluster_captures-Tool und beschrifte mir die Themen
+pro Cluster anhand der zentralen Einträge."
+"Clustere meine Notizen mit k=5 und zeig mir, was in jedem Cluster ist."
 ```
-Umsetzung: Embeddings via `psycopg` laden → `sklearn.cluster.KMeans` (oder
-`hdbscan` für automatische Clusterzahl) → pro Cluster die Summaries an ein
-LLM zur Beschriftung geben.
+Beispielergebnis (real gegen den lokalen Compose-Stack verifiziert): 6
+Notizen — 3 zu "Sarah plant Jobwechsel in Richtung Consulting" (business/
+company/firm), 3 zu einem Sauerteig-Brotrezept (rye/wheat/spelt starter) —
+wurden sowohl mit `k=2` als auch mit automatischer k-Bestimmung
+(Silhouette-Score, gewählt: `k=2`) sauber in zwei themenreine Cluster
+getrennt, alle 3 Mitglieder je Cluster als `central: true` markiert (bei
+Clustergröße 3 sind alle zentral). `stats` vor/nach bestätigt: das Tool
+mutiert nichts.
+
+Umsetzung (`openbrain-mcp/app/store.py`):
+```python
+def cluster_captures(conn: psycopg.Connection, *, k: int | None = None) -> dict:
+    ...
+    if k is None:
+        k = _auto_select_k(embeddings)  # sklearn KMeans + silhouette_score, k=2..10
+    model = KMeans(n_clusters=k, random_state=0, n_init=10).fit(embeddings)
+    distances = model.transform(embeddings)  # Distanz jedes Punkts zu jedem Centroid
+    ...
+```
+Ungültiges `k` (0, negativ, oder größer als die Gesamtzahl an Notizen) und
+zu wenige Notizen insgesamt (< 4) liefern beide ein sauberes
+`{"error": "..."}`-Dict statt eines Absturzes.
 
 ### Klassifikation (noch zu bauen)
 
@@ -331,7 +355,18 @@ Vier Fähigkeiten, die als neue MCP-Tools nach dem bestehenden Muster
    Bewusste Abweichung vom `server.py`→`store.py`-Muster der anderen sieben
    Tools: `compute_fingerprint` ruft `content_fingerprint_debug` direkt auf,
    da kein DB-Zugriff nötig ist.
-3. ⏳ Clustering
+3. ✅ **Clustering** (`cluster_captures`) — fertig, gemergt auf `main` am
+   2026-07-21. Spec:
+   [`docs/superpowers/specs/2026-07-21-openbrain-clustering-design.md`](docs/superpowers/specs/2026-07-21-openbrain-clustering-design.md),
+   Plan:
+   [`docs/superpowers/plans/2026-07-21-openbrain-clustering.md`](docs/superpowers/plans/2026-07-21-openbrain-clustering.md).
+   29/29 Tests grün, End-to-End-Smoke-Test gegen einen echten lokalen
+   Docker-Compose-Stack verifiziert (6 Notizen aus 2 Themen sauber getrennt,
+   sowohl mit festem `k` als auch automatisch per Silhouette-Score). Neue
+   Abhängigkeit: `scikit-learn`. Keine LLM-Aufrufe in `openbrain-mcp` — die
+   Themen-Beschriftung macht der aufrufende Client. Review-getriebene
+   Ergänzung: ungültiges `k` liefert ein sauberes Error-Dict statt eines
+   sklearn-Stacktraces.
 4. ⏳ Klassifikation (inkl. Rücklesen von `metadata`)
 
 Details und Fortschritt zu den noch offenen Punkten siehe die jeweiligen
