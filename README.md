@@ -129,7 +129,8 @@ Implemented in [`openbrain-mcp/app/server.py`](openbrain-mcp/app/server.py), del
 | `compute_fingerprint(raw_text, source_url?)` | Read-only, no DB access. Shows the SHA-256 dedup fingerprint `save` would compute for this input, plus the normalized string it's based on — for debugging the fingerprint mechanism, not for checking against existing captures. |
 
 All except `save`/`update`'s pass-through of `metadata` are exercised by the test suite
-(`openbrain-mcp/tests/`, 24 tests; `compute_fingerprint`'s tests need no database).
+(`openbrain-mcp/tests/`, 24 tests, mostly run against a real Postgres+pgvector instance;
+`compute_fingerprint`'s tests are the exception and need no database).
 
 ## Repository layout
 
