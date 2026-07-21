@@ -342,7 +342,7 @@ Change:
 ```
 to:
 ```markdown
-(`openbrain-mcp/tests/`, 28 tests, mostly run against a real Postgres+pgvector instance;
+(`openbrain-mcp/tests/`, 29 tests, mostly run against a real Postgres+pgvector instance;
 `compute_fingerprint`'s tests are the exception and need no database).
 ```
 
@@ -352,7 +352,7 @@ Change:
 ```
 to:
 ```markdown
-  tests/                     # 28 tests, pytest
+  tests/                     # 29 tests, pytest
 ```
 
 - [ ] **Step 3: Update the remaining "eight" references and repo-layout comments** **[repo]**
