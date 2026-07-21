@@ -190,7 +190,7 @@ def test_cluster_captures_auto_k_picks_a_reasonable_cluster_count():
     id_to_topic = _save_topic_fixture()
     with get_conn() as conn:
         result = store.cluster_captures(conn)  # k=None -> auto via silhouette
-    assert 2 <= result["k"] <= 14
+    assert 2 <= result["k"] <= 10  # _MAX_AUTO_K caps the search at 10
     # Not asserting k == 3 exactly (would over-fit the test to this specific
     # embedding model's silhouette behavior) -- but however many clusters it
     # picked, each one must still be internally topic-pure. A sub-split of a
@@ -222,3 +222,14 @@ def test_cluster_captures_reports_error_below_minimum():
     with get_conn() as conn:
         result = store.cluster_captures(conn)
     assert result == {"error": "need at least 4 captures to cluster, have 2"}
+
+def test_cluster_captures_rejects_out_of_range_explicit_k():
+    _clean()
+    _save_topic_fixture()  # 15 captures
+    with get_conn() as conn:
+        too_high = store.cluster_captures(conn, k=100)
+        zero = store.cluster_captures(conn, k=0)
+        negative = store.cluster_captures(conn, k=-1)
+    assert too_high == {"error": "k must be between 1 and 15, got 100"}
+    assert zero == {"error": "k must be between 1 and 15, got 0"}
+    assert negative == {"error": "k must be between 1 and 15, got -1"}

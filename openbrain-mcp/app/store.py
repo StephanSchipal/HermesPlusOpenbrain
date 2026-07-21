@@ -101,6 +101,9 @@ def cluster_captures(conn: psycopg.Connection, *, k: int | None = None) -> dict:
     if len(rows) < _MIN_CAPTURES_TO_CLUSTER:
         return {"error": f"need at least {_MIN_CAPTURES_TO_CLUSTER} captures to cluster, have {len(rows)}"}
 
+    if k is not None and not (1 <= k <= len(rows)):
+        return {"error": f"k must be between 1 and {len(rows)}, got {k}"}
+
     ids = [str(r[0]) for r in rows]
     summaries = [r[1] for r in rows]
     embeddings = [r[2].to_list() for r in rows]  # pgvector Vector -> plain list for sklearn
@@ -124,7 +127,8 @@ def cluster_captures(conn: psycopg.Connection, *, k: int | None = None) -> dict:
 
     return {"k": k, "clusters": clusters}
 
-def _auto_select_k(embeddings: list, max_k: int = _MAX_AUTO_K) -> int:
+def _auto_select_k(embeddings: list[list[float]], max_k: int = _MAX_AUTO_K) -> int:
+    """Try k = 2..min(max_k, n-1) and return the k with the best silhouette score."""
     upper = min(max_k, len(embeddings) - 1)
     best_k, best_score = 2, -1.0
     for candidate_k in range(2, upper + 1):
