@@ -9,6 +9,7 @@ from starlette.routing import Route
 from app.config import OPENBRAIN_TOKEN
 from app.db import get_conn
 from app import store
+from app.fingerprint import content_fingerprint_debug
 
 # host="0.0.0.0" (not the FastMCP default "127.0.0.1") disables the MCP SDK's
 # DNS-rebinding host-header check, which otherwise 421s any request whose Host
@@ -68,6 +69,14 @@ def find_near_duplicates(threshold: float = 0.95, limit: int = 50) -> list[dict]
     Read-only -- use the existing `delete` tool to remove one side of a pair."""
     with get_conn() as conn:
         return store.find_near_duplicates(conn, threshold=threshold, limit=limit)
+
+@mcp.tool()
+def compute_fingerprint(raw_text: str, source_url: str | None = None) -> dict:
+    """Show the dedup fingerprint `save` would compute for this input, and the
+    normalized string it's based on. Read-only, no DB access -- does not check
+    whether this fingerprint already exists (use `save` or `find_near_duplicates`
+    for that)."""
+    return content_fingerprint_debug(source_url=source_url, raw_text=raw_text)
 
 class BearerAuthMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
