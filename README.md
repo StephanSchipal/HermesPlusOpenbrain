@@ -127,7 +127,7 @@ Implemented in [`openbrain-mcp/app/server.py`](openbrain-mcp/app/server.py), del
 | `update(id, summary?, keywords?, metadata?)` | Edit a capture. Changing `summary` re-embeds it. `metadata` is a full replace, not a merge. |
 | `find_near_duplicates(threshold=0.95, limit=50)` | Read-only. Lists capture pairs whose summaries are near-duplicates by embedding cosine similarity — catches near-duplicates the exact-fingerprint dedup in `save` misses. Delete one side of a pair via the existing `delete` tool. |
 | `compute_fingerprint(raw_text, source_url?)` | Read-only, no DB access. Shows the SHA-256 dedup fingerprint `save` would compute for this input, plus the normalized string it's based on — for debugging the fingerprint mechanism, not for checking against existing captures. |
-| `cluster_captures(k?)` | Read-only. Groups all captures into thematic clusters by embedding similarity (k-Means). If `k` is omitted, the cluster count is chosen automatically via silhouette score. Returns full cluster membership with a `central` flag marking each cluster's 3 most representative entries — cluster *labeling* is left to the calling client. |
+| `cluster_captures(k?)` | Read-only. Groups all captures into thematic clusters by embedding similarity (k-Means). If `k` is omitted, the cluster count is chosen automatically via silhouette score. Returns full cluster membership with a `central` flag marking each cluster's up to 3 most representative entries — cluster *labeling* is left to the calling client. |
 
 All except `save`/`update`'s pass-through of `metadata` are exercised by the test suite
 (`openbrain-mcp/tests/`, 29 tests, mostly run against a real Postgres+pgvector instance;

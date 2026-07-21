@@ -85,7 +85,7 @@ def cluster_captures(k: int | None = None) -> dict:
     """Group all captures into thematic clusters by embedding similarity.
     Read-only. If k is omitted, the number of clusters is chosen
     automatically via silhouette score. Returns each cluster's full
-    membership (id + summary), with a `central` flag marking the 3 entries
+    membership (id + summary), with a `central` flag marking up to 3 entries
     closest to that cluster's centroid -- use those to label the cluster's
     theme, since this tool does not generate labels itself. k must be
     between 1 and the total capture count, or omitted; too few captures
