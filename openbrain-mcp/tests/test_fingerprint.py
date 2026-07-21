@@ -1,5 +1,5 @@
 # tests/test_fingerprint.py
-from app.fingerprint import content_fingerprint
+from app.fingerprint import content_fingerprint, content_fingerprint_debug
 
 def test_same_url_same_fingerprint_regardless_of_case_or_trailing_slash():
     a = content_fingerprint(source_url="https://YouTube.com/watch?v=abc/", raw_text="x")
@@ -34,3 +34,17 @@ def test_different_urls_still_differ_after_normalization():
     a = content_fingerprint(source_url="https://youtu.be/abc123?si=XYZ789", raw_text="x")
     b = content_fingerprint(source_url="https://youtu.be/def456?si=XYZ789", raw_text="x")
     assert a != b  # stripping tracking params must not cause distinct content to collide
+
+def test_debug_matches_content_fingerprint():
+    kwargs = dict(source_url="https://youtu.be/abc123?si=XYZ789", raw_text="x")
+    assert content_fingerprint_debug(**kwargs)["fingerprint"] == content_fingerprint(**kwargs)
+
+def test_debug_reports_url_basis_when_url_present():
+    result = content_fingerprint_debug(source_url="https://WWW.Example.com/page/", raw_text="ignored")
+    assert result["basis_source"] == "url"
+    assert result["normalized_basis"] == "example.com/page"
+
+def test_debug_reports_text_basis_when_no_url():
+    result = content_fingerprint_debug(source_url=None, raw_text="  Hello World  ")
+    assert result["basis_source"] == "text"
+    assert result["normalized_basis"] == "hello world"

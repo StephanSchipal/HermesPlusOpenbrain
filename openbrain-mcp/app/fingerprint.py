@@ -26,6 +26,12 @@ def _normalize_url(url: str) -> str:
 def _normalize_text(text: str) -> str:
     return re.sub(r"\s+", " ", (text or "").strip().lower())
 
+def _compute_basis(*, source_url: str | None, raw_text: str) -> tuple[str, str]:
+    """Returns (normalized_basis, basis_source) where basis_source is "url" or "text"."""
+    if source_url:
+        return _normalize_url(source_url), "url"
+    return _normalize_text(raw_text), "text"
+
 def content_fingerprint(*, source_url: str | None, raw_text: str) -> str:
     """Stable dedup key. Prefer the normalized URL; fall back to normalized text.
 
@@ -35,5 +41,16 @@ def content_fingerprint(*, source_url: str | None, raw_text: str) -> str:
     content forwarded twice on WhatsApp still dedupes even though each share
     link carries a different tracking token.
     """
-    basis = _normalize_url(source_url) if source_url else _normalize_text(raw_text)
+    basis, _ = _compute_basis(source_url=source_url, raw_text=raw_text)
     return hashlib.sha256(basis.encode("utf-8")).hexdigest()
+
+def content_fingerprint_debug(*, source_url: str | None, raw_text: str) -> dict:
+    """Same computation as content_fingerprint, but also exposes the
+    normalized string that was hashed and which input it came from --
+    for introspection/debugging, not for dedup decisions."""
+    basis, source = _compute_basis(source_url=source_url, raw_text=raw_text)
+    return {
+        "fingerprint": hashlib.sha256(basis.encode("utf-8")).hexdigest(),
+        "normalized_basis": basis,
+        "basis_source": source,
+    }
