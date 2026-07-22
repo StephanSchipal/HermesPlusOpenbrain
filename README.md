@@ -79,7 +79,7 @@ Two new containers join the existing `hermes-agent` + `traefik` stack:
   published, never on Hermes' network — reachable only from `openbrain-mcp`, enforced at the
   Docker network layer (not just by convention).
 - **`openbrain-mcp`** — a small Python service. Loads a local multilingual sentence-embedding
-  model once (`intfloat/multilingual-e5-small`, 384-dim) and exposes nine tools over the
+  model once (`intfloat/multilingual-e5-small`, 384-dim) and exposes ten tools over the
   [Model Context Protocol](https://modelcontextprotocol.io) (Streamable HTTP transport). Sits on
   *two* Docker networks: `openbrain_internal` (talks to the db) and Hermes' own network (so Hermes
   can call it by container name), and is fronted by Traefik for TLS + remote laptop access.
@@ -112,7 +112,7 @@ Sending the same link twice (WhatsApp forwards routinely carry different trackin
 e.g. YouTube's `?si=`) is deduped via `fingerprint` — the second send returns the existing row
 instead of creating a duplicate.
 
-## The nine MCP tools
+## The ten MCP tools
 
 Implemented in [`openbrain-mcp/app/server.py`](openbrain-mcp/app/server.py), delegating to
 [`openbrain-mcp/app/store.py`](openbrain-mcp/app/store.py):
@@ -128,9 +128,10 @@ Implemented in [`openbrain-mcp/app/server.py`](openbrain-mcp/app/server.py), del
 | `find_near_duplicates(threshold=0.95, limit=50)` | Read-only. Lists capture pairs whose summaries are near-duplicates by embedding cosine similarity — catches near-duplicates the exact-fingerprint dedup in `save` misses. Delete one side of a pair via the existing `delete` tool. |
 | `compute_fingerprint(raw_text, source_url?)` | Read-only, no DB access. Shows the SHA-256 dedup fingerprint `save` would compute for this input, plus the normalized string it's based on — for debugging the fingerprint mechanism, not for checking against existing captures. |
 | `cluster_captures(k?)` | Read-only. Groups all captures into thematic clusters by embedding similarity (k-Means). If `k` is omitted, the cluster count is chosen automatically via silhouette score. Returns full cluster membership with a `central` flag marking each cluster's up to 3 most representative entries — cluster *labeling* is left to the calling client. |
+| `classify_captures(categories, ids?)` | Read-only. Classifies captures into caller-supplied `{name, example}` categories by embedding similarity (zero-shot, no pre-labeled data needed). Omit `ids` to classify everything. Persist a result via the existing `update` tool if desired — this tool writes nothing itself. |
 
 All except `save`/`update`'s pass-through of `metadata` are exercised by the test suite
-(`openbrain-mcp/tests/`, 29 tests, mostly run against a real Postgres+pgvector instance;
+(`openbrain-mcp/tests/`, 33 tests, mostly run against a real Postgres+pgvector instance;
 `compute_fingerprint`'s tests are the exception and need no database).
 
 ## Repository layout
@@ -143,10 +144,10 @@ openbrain-mcp/
     fingerprint.py   # content_fingerprint() / content_fingerprint_debug() — SHA-256 dedup key
     embeddings.py     # e5 model wrapper (passage:/query: prefixes)
     db.py              # get_conn() — psycopg + pgvector registration
-    store.py            # save/search/recent/stats/delete/update/find_near_duplicates/cluster_captures — the only file with SQL
-    server.py             # the 9 MCP tools + bearer auth + /health
+    store.py            # save/search/recent/stats/delete/update/find_near_duplicates/cluster_captures/classify_captures — the only file with SQL
+    server.py             # the 10 MCP tools + bearer auth + /health
   migrations/001_init.sql   # schema
-  tests/                     # 29 tests, pytest
+  tests/                     # 33 tests, pytest
   Dockerfile
   pyproject.toml
 deploy/
@@ -191,7 +192,7 @@ curl -H "Authorization: Bearer <your token>" http://localhost:8080/mcp     # MCP
 ```
 
 Any MCP client (the `mcp` Python SDK, Claude Desktop, Claude Code) can connect to
-`http://localhost:8080/mcp` with that bearer token and call the nine tools directly — useful for
+`http://localhost:8080/mcp` with that bearer token and call the ten tools directly — useful for
 testing before Hermes/laptop wiring exists (Phases 5-6).
 
 Run the test suite against a live database:
