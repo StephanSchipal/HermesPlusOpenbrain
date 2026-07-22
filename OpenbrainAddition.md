@@ -66,7 +66,7 @@ Capture-Kanal dient **WhatsApp**, statt Supabase Edge Functions ein
 - `openbrain-mcp`: Python-Service mit lokalem Embedding-Modell
   (`intfloat/multilingual-e5-small`), Bearer-Token-Auth, hinter Traefik/TLS
 
-**Die 9 bestehenden MCP-Tools**
+**Die 10 bestehenden MCP-Tools**
 (`openbrain-mcp/app/server.py`, delegiert an `openbrain-mcp/app/store.py`):
 
 | Tool | Funktion |
@@ -80,6 +80,7 @@ Capture-Kanal dient **WhatsApp**, statt Supabase Edge Functions ein
 | `find_near_duplicates(threshold=0.95, limit=50)` | **Neu (2026-07-20).** Read-only: findet Notizpaare mit sehr ähnlicher Bedeutung per Embedding-Kosinus-Ähnlichkeit — ergänzt den exakten Fingerprint-Dedup aus `save` um Fälle mit unterschiedlicher Formulierung |
 | `compute_fingerprint(raw_text, source_url?)` | **Neu (2026-07-21).** Read-only, kein DB-Zugriff: zeigt den SHA-256-Fingerprint, den `save` für diese Eingabe berechnen würde, plus die normalisierte Zeichenkette dahinter — zum Nachvollziehen/Debuggen des Fingerprint-Mechanismus, kein Duplikat-Check gegen bestehende Einträge |
 | `cluster_captures(k?)` | **Neu (2026-07-21).** Read-only: gruppiert alle Notizen per k-Means nach Embedding-Ähnlichkeit in thematische Cluster — `k` optional, sonst automatisch per Silhouette-Score bestimmt. Gibt volle Cluster-Mitgliedschaft zurück, mit `central`-Flag für die (bis zu) 3 zentralsten Einträge je Cluster; die Themen-*Beschriftung* macht bewusst der aufrufende Client, nicht das Tool selbst |
+| `classify_captures(categories, ids?)` | **Neu (2026-07-22).** Read-only: klassifiziert Notizen per Zero-Shot-Embedding-Ähnlichkeit in vom Aufrufer mitgegebene Kategorien (`{name, beispielsatz}`-Paare, nicht fix im Code) — keine Trainingsdaten nötig. Liefert pro Notiz die beste Kategorie plus Ähnlichkeits-Score; `ids` optional zum Eingrenzen. Speichert nichts selbst — Persistieren erfolgt über das bestehende `update`-Tool |
 
 **Aktueller Stand** (laut `README.md`): System **komplett fertig und live**
 (Phase 0–7 alle ✅) — auf dem VPS hinter Traefik mit echtem HTTPS deployt,
@@ -286,6 +287,10 @@ Desktop, Hermes), da der ja selbst ein LLM ist. Endnutzer-Prompt:
 "Nutze openbrains cluster_captures-Tool und beschrifte mir die Themen
 pro Cluster anhand der zentralen Einträge."
 "Clustere meine Notizen mit k=5 und zeig mir, was in jedem Cluster ist."
+"Ich hab das Gefühl, ich notiere immer wieder dieselben paar Dinge —
+cluster automatisch (ohne k) und sag mir, ob das stimmt."
+"Gib mir eine grobe Themenübersicht über mein ganzes Brain mit k=10,
+jeweils mit Titel und Anzahl der Notizen pro Cluster."
 ```
 Beispielergebnis (real gegen den lokalen Compose-Stack verifiziert): 6
 Notizen — 3 zu "Sarah plant Jobwechsel in Richtung Consulting" (business/
@@ -310,28 +315,52 @@ Ungültiges `k` (0, negativ, oder größer als die Gesamtzahl an Notizen) und
 zu wenige Notizen insgesamt (< 4) liefern beide ein sauberes
 `{"error": "..."}`-Dict statt eines Absturzes.
 
-### Klassifikation (noch zu bauen)
+### Klassifikation (existiert bereits — `classify_captures`)
 
-**a) Zero-Shot** (keine Trainingsdaten nötig, nutzt Ähnlichkeit zu
-Label-Beschreibungen):
-```
-"Klassifiziere jede Notiz aus den letzten 30 Tagen in eine dieser Kategorien:
-Entscheidung, Personen-Notiz, Insight, Meeting-Debrief, sonstiges — indem du
-die Ähnlichkeit des Embeddings zu einem Beispielsatz je Kategorie berechnest,
-und speichere das Ergebnis ins metadata-Feld als {"category": "..."}."
-```
+Zero-Shot: keine Trainingsdaten nötig, das Tool vergleicht per
+Embedding-Ähnlichkeit gegen einen Beispielsatz je Kategorie. Anders als
+beim ursprünglichen Sketch sind die Kategorien **nicht** fix im Code
+hinterlegt, sondern werden bei jedem Aufruf vom Client mitgegeben —
+konsistent mit `cluster_captures`s Philosophie: das Tool macht die
+Embedding-Mathematik, der Client (selbst ein LLM) bringt die inhaltliche
+Definition mit. Das Tool selbst ist read-only und speichert nichts —
+Persistieren erfolgt bewusst getrennt über das bestehende `update`-Tool.
+Endnutzer-Prompts:
 
-**b) Neuer Eintrag zur nächstgelegenen bekannten Kategorie**:
 ```
-"Wenn eine neue Notiz reinkommt: finde die 5 ähnlichsten bereits
-kategorisierten Einträge (per Embedding-Distanz) und übernimm die
-Mehrheits-Kategorie."
+"Klassifiziere alle meine Notizen in die Kategorien Entscheidung,
+Personen-Notiz, Insight, Meeting-Debrief, sonstiges — mit je einem
+Beispielsatz pro Kategorie — und fasse zusammen, wie viele in welche
+Kategorie fallen."
+"Nutze classify_captures und sag mir, ob diese eine bestimmte Notiz eher
+'Karriere' oder 'Freizeit' ist." (mit ids auf die eine Notiz eingegrenzt)
+"Klassifiziere meine Notizen in Themen, die zu meinem Job passen, und
+speichere das Ergebnis für jede als category in ihren metadata."
 ```
+Beispielergebnis (real gegen den lokalen Compose-Stack verifiziert): 4
+Notizen — 2 zu "Sarah plant Jobwechsel" (business/company), 2 zu einem
+Sauerteig-Brotrezept (rye/wheat starter) — wurden mit den Kategorien
+`career`/`cooking` (je ein Beispielsatz) korrekt zugeordnet, Similarity-
+Scores zwischen `0.84` und `0.85`. Der `ids`-Filter auf nur die 2
+"career"-Notizen lieferte exakt diese beiden zurück; eine leere
+Kategorien-Liste lieferte ein sauberes Error-Dict statt eines Crashs.
+`stats` vor/nach bestätigt: das Tool mutiert nichts.
 
-> Hinweis: Das `metadata jsonb`-Feld ist laut `README.md` aktuell
-> "write-only" (wird gespeichert, aber von keinem Tool zurückgelesen) — für
-> Variante (a) braucht es zusätzlich ein `get-by-id`- oder ein erweitertes
-> `search`-Tool, das `metadata` mit ausliest.
+Umsetzung (`openbrain-mcp/app/store.py`):
+```python
+def classify_captures(conn, *, categories: list[dict], ids=None):
+    # categories: [{"name": "career", "example": "..."}, ...]
+    category_embeddings = [embed_passage(c["example"]) for c in categories]
+    sims = cosine_similarity(capture_embeddings, category_embeddings)
+    # pro Notiz: Kategorie mit dem höchsten Score (Argmax)
+```
+Zwei-Schritt-Workflow zum dauerhaften Speichern: erst `classify_captures`
+aufrufen, dann pro Notiz `update(id, metadata={"category": "..."})` —
+Achtung, `metadata` wird dabei komplett ersetzt, nicht gemergt. Ein
+späteres gezieltes Filtern nach `category` (z. B. "zeig mir alle
+Entscheidung-Notizen") ist bewusst **nicht** Teil dieser Fähigkeit — dafür
+müsste `metadata` erst lesbar gemacht werden (aktuell "write-only", siehe
+`README.md`), das wäre eine eigene, spätere Erweiterung.
 
 ## 8. Erweiterungen — Status
 
@@ -367,7 +396,20 @@ Vier Fähigkeiten, die als neue MCP-Tools nach dem bestehenden Muster
    Themen-Beschriftung macht der aufrufende Client. Review-getriebene
    Ergänzung: ungültiges `k` liefert ein sauberes Error-Dict statt eines
    sklearn-Stacktraces.
-4. ⏳ Klassifikation (inkl. Rücklesen von `metadata`)
+4. ✅ **Klassifikation** (`classify_captures`) — fertig, gemergt auf `main`
+   am 2026-07-22. Spec:
+   [`docs/superpowers/specs/2026-07-22-openbrain-classification-design.md`](docs/superpowers/specs/2026-07-22-openbrain-classification-design.md),
+   Plan:
+   [`docs/superpowers/plans/2026-07-22-openbrain-classification.md`](docs/superpowers/plans/2026-07-22-openbrain-classification.md).
+   33/33 Tests grün, End-to-End-Smoke-Test gegen einen echten lokalen
+   Docker-Compose-Stack verifiziert (4 Notizen aus 2 Themen korrekt
+   klassifiziert, `ids`-Filter und Error-Fall verifiziert). Keine neue
+   Abhängigkeit (nutzt `scikit-learn`, bereits durch Clustering vorhanden).
+   Zero-Shot mit **vom Aufrufer mitgegebenen** Kategorien (nicht fix im
+   Code) — read-only, Persistieren bewusst getrennt über das bestehende
+   `update`-Tool. `metadata`-Rücklesen/-Filtern explizit **nicht** Teil
+   dieser Fähigkeit (siehe §7).
 
-Details und Fortschritt zu den noch offenen Punkten siehe die jeweiligen
-Spec-/Plan-Dokumente unter `docs/superpowers/`, sobald sie angelegt sind.
+Damit sind alle 4 ursprünglich geplanten Fähigkeiten umgesetzt. Details zu
+jeder einzelnen siehe die jeweiligen Spec-/Plan-Dokumente unter
+`docs/superpowers/`.
