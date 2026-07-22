@@ -233,3 +233,72 @@ def test_cluster_captures_rejects_out_of_range_explicit_k():
     assert too_high == {"error": "k must be between 1 and 15, got 100"}
     assert zero == {"error": "k must be between 1 and 15, got 0"}
     assert negative == {"error": "k must be between 1 and 15, got -1"}
+
+_CLASSIFY_TOPICS = {
+    "career": [
+        "Sarah is considering leaving her job to start a consulting business.",
+        "Sarah is considering leaving her job to start a consulting company.",
+        "Sarah is considering leaving her job to start a consulting firm.",
+    ],
+    "cooking": [
+        "A recipe for sourdough bread using a rye starter.",
+        "A recipe for sourdough bread using a wheat starter.",
+        "A recipe for sourdough bread using a spelt starter.",
+    ],
+}
+
+_CLASSIFY_CATEGORIES = [
+    {"name": "career", "example": "Someone is thinking about changing jobs or careers."},
+    {"name": "cooking", "example": "A recipe or cooking technique."},
+]
+
+def _save_classify_fixture() -> dict:
+    """Saves 6 captures (2 topics x 3 near-duplicate-worded captures each).
+    Returns {capture_id: topic_name}."""
+    id_to_topic = {}
+    with get_conn() as conn:
+        for topic, summaries in _CLASSIFY_TOPICS.items():
+            for i, summary in enumerate(summaries):
+                r = store.save_capture(
+                    conn, raw_text=f"{topic}-{i}", summary=summary,
+                    keywords=[topic], source="other",
+                    source_url=f"https://example.com/classify-{topic}-{i}",
+                )
+                id_to_topic[r["id"]] = topic
+    return id_to_topic
+
+def test_classify_captures_assigns_expected_category():
+    _clean()
+    id_to_topic = _save_classify_fixture()
+    with get_conn() as conn:
+        results = store.classify_captures(conn, categories=_CLASSIFY_CATEGORIES)
+    assert len(results) == 6
+    by_id = {r["id"]: r for r in results}
+    for capture_id, topic in id_to_topic.items():
+        assert by_id[capture_id]["category"] == topic, (
+            f"expected {capture_id} ({by_id[capture_id]['summary']!r}) to classify as "
+            f"{topic!r}, got {by_id[capture_id]['category']!r}"
+        )
+        assert by_id[capture_id]["score"] > 0.0
+
+def test_classify_captures_respects_ids_filter():
+    _clean()
+    id_to_topic = _save_classify_fixture()
+    career_ids = [cid for cid, topic in id_to_topic.items() if topic == "career"]
+    with get_conn() as conn:
+        results = store.classify_captures(
+            conn, categories=_CLASSIFY_CATEGORIES, ids=career_ids)
+    assert {r["id"] for r in results} == set(career_ids)
+
+def test_classify_captures_rejects_empty_categories():
+    _clean()
+    _save_classify_fixture()
+    with get_conn() as conn:
+        result = store.classify_captures(conn, categories=[])
+    assert result == {"error": "categories must be a non-empty list of {name, example} dicts"}
+
+def test_classify_captures_returns_empty_list_when_nothing_to_classify():
+    _clean()
+    with get_conn() as conn:
+        result = store.classify_captures(conn, categories=_CLASSIFY_CATEGORIES)
+    assert result == []

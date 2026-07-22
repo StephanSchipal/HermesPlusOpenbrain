@@ -3,6 +3,7 @@ import psycopg
 from psycopg.types.json import Json
 from sklearn.cluster import KMeans
 from sklearn.metrics import silhouette_score
+from sklearn.metrics.pairwise import cosine_similarity
 from app.keywords import normalize_keywords
 from app.embeddings import embed_passage, embed_query
 from app.fingerprint import content_fingerprint
@@ -137,6 +138,47 @@ def _auto_select_k(embeddings: list[list[float]], max_k: int = _MAX_AUTO_K) -> i
         if score > best_score:
             best_k, best_score = candidate_k, score
     return best_k
+
+def classify_captures(conn: psycopg.Connection, *, categories: list[dict],
+                      ids: list[str] | None = None) -> list[dict] | dict:
+    """Classify captures into caller-supplied categories by embedding
+    similarity to one example sentence per category. Read-only -- does not
+    write to metadata; use the existing `update` tool to persist a result.
+
+    categories: [{"name": str, "example": str}, ...], at least one required.
+    ids: optional subset of capture ids to classify; omit to classify all.
+    """
+    if not categories:
+        return {"error": "categories must be a non-empty list of {name, example} dicts"}
+
+    query = "SELECT id, summary, embedding FROM captures"
+    params: tuple = ()
+    if ids is not None:
+        query += " WHERE id = ANY(%s::uuid[])"
+        params = (ids,)
+    with conn.cursor() as cur:
+        cur.execute(query, params)
+        rows = cur.fetchall()
+
+    if not rows:
+        return []
+
+    capture_embeddings = [r[2].to_list() for r in rows]
+    category_names = [c["name"] for c in categories]
+    category_embeddings = [embed_passage(c["example"]) for c in categories]
+
+    sims = cosine_similarity(capture_embeddings, category_embeddings)
+
+    results = []
+    for i, row in enumerate(rows):
+        best_idx = max(range(len(categories)), key=lambda j: sims[i][j])
+        results.append({
+            "id": str(row[0]),
+            "summary": row[1],
+            "category": category_names[best_idx],
+            "score": float(sims[i][best_idx]),
+        })
+    return results
 
 def fetch_recent(conn: psycopg.Connection, *, n: int = 10) -> list[dict]:
     with conn.cursor() as cur:
