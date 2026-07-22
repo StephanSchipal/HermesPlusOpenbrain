@@ -99,7 +99,9 @@ def classify_captures(categories: list[dict], ids: list[str] | None = None) -> l
     similarity. Each category is {"name": str, "example": str} -- an empty
     `categories` list returns {"error": ...} instead of raising. Read-only:
     does not persist the result. To keep a classification, call
-    `update(id, metadata={"category": ...})` separately. Omit `ids` to
+    `update(id, metadata={"category": ...})` separately -- note that
+    `update`'s metadata is a full replace, not a merge, so this will
+    overwrite any existing metadata on that capture. Omit `ids` to
     classify every capture, or pass specific ids to classify only those --
     returns [] if none match."""
     with get_conn() as conn:
