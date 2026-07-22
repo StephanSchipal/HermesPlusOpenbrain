@@ -96,11 +96,12 @@ def cluster_captures(k: int | None = None) -> dict:
 @mcp.tool()
 def classify_captures(categories: list[dict], ids: list[str] | None = None) -> list[dict] | dict:
     """Classify captures into caller-supplied categories by embedding
-    similarity. Each category is {"name": str, "example": str} -- provide
-    at least one. Read-only: does not persist the result. To keep a
-    classification, call `update(id, metadata={"category": ...})`
-    separately. Omit `ids` to classify every capture, or pass specific ids
-    to classify only those."""
+    similarity. Each category is {"name": str, "example": str} -- an empty
+    `categories` list returns {"error": ...} instead of raising. Read-only:
+    does not persist the result. To keep a classification, call
+    `update(id, metadata={"category": ...})` separately. Omit `ids` to
+    classify every capture, or pass specific ids to classify only those --
+    returns [] if none match."""
     with get_conn() as conn:
         return store.classify_captures(conn, categories=categories, ids=ids)
 
