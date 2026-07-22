@@ -93,6 +93,17 @@ def cluster_captures(k: int | None = None) -> dict:
     with get_conn() as conn:
         return store.cluster_captures(conn, k=k)
 
+@mcp.tool()
+def classify_captures(categories: list[dict], ids: list[str] | None = None) -> list[dict] | dict:
+    """Classify captures into caller-supplied categories by embedding
+    similarity. Each category is {"name": str, "example": str} -- provide
+    at least one. Read-only: does not persist the result. To keep a
+    classification, call `update(id, metadata={"category": ...})`
+    separately. Omit `ids` to classify every capture, or pass specific ids
+    to classify only those."""
+    with get_conn() as conn:
+        return store.classify_captures(conn, categories=categories, ids=ids)
+
 class BearerAuthMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         if request.url.path == "/health":
