@@ -151,13 +151,33 @@ openbrain-mcp/
   tests/                     # 36 tests, pytest
   Dockerfile
   pyproject.toml
+openbrain-gui/                # Phase 1 web GUI — see its own section below
+  Dockerfile                    # multi-stage: builds the frontend, copies dist/ into the backend image
+  .dockerignore
+  backend/
+    app/
+      config.py                    # env-var loading
+      db.py                         # SQLite connection + schema (prompts, delete_log)
+      mcp_client.py                  # openbrain-mcp client wrapper (bearer-token auth)
+      subject_line.py                 # Claude Haiku subject-line generator + truncation fallback
+      prompts_store.py                  # saved-prompts CRUD (SQLite)
+      delete_log_store.py                 # delete-log insert/list (SQLite)
+      routes.py                             # the /api/* FastAPI routes
+      main.py                                 # app factory, static frontend mount
+    tests/                                     # 24 tests, pytest
+    pyproject.toml
+  frontend/
+    src/                                        # React components (Vite, plain JS/JSX, no TS)
+    package.json
 deploy/
-  docker-compose.openbrain.yml   # openbrain-db + openbrain-mcp, Traefik labels
+  docker-compose.openbrain.yml   # openbrain-db + openbrain-mcp + openbrain-gui, Traefik labels
   .env.example                    # required env vars (no real secrets)
 docs/superpowers/
   specs/2026-06-30-hermes-openbrain-memory-design.md    # the "what" and "why"
   plans/2026-06-30-hermes-openbrain-memory.md            # the "how", task-by-task, with a
                                                             revision log of every bug found+fixed
+  specs/2026-07-24-openbrain-gui-phase1-design.md         # the web GUI's design spec
+  plans/2026-07-24-openbrain-gui-phase1.md                 # the web GUI's implementation plan
 ```
 
 ## Running it locally
@@ -292,6 +312,76 @@ BOM that Desktop's JSON parser rejects) also had to be fixed by writing the conf
 See the design spec §6 and the plan's "Known follow-ups" section for lower-priority hardening
 ideas already identified but deliberately deferred (e.g. a read-only token for laptop clients vs.
 a write token for Hermes, constant-time token comparison).
+
+## OpenBrain Web GUI (Phase 1)
+
+A single-user React + FastAPI web GUI for browsing, searching, editing, and deleting captures — a
+friendlier alternative to querying via Claude Desktop/Code or WhatsApp. Phase 1 of a three-phase
+plan (Phase 2: dynamic word cloud + AND/OR keyword search; Phase 3: surfacing clustering/
+classification in the GUI — both future work, not yet started).
+
+Full details:
+- Design spec — [`docs/superpowers/specs/2026-07-24-openbrain-gui-phase1-design.md`](docs/superpowers/specs/2026-07-24-openbrain-gui-phase1-design.md)
+- Implementation plan — [`docs/superpowers/plans/2026-07-24-openbrain-gui-phase1.md`](docs/superpowers/plans/2026-07-24-openbrain-gui-phase1.md)
+
+**Architecture:** one new container (`openbrain-gui`), combining a Vite-built React SPA (served as
+static files) with a FastAPI backend, built via a multi-stage Dockerfile. The backend is the only
+thing holding secrets (`OPENBRAIN_TOKEN`, an Anthropic API key) and the only thing that talks to
+`openbrain-mcp` — as just another authenticated MCP client, the same way Claude Desktop/Code do —
+or to Claude Haiku (for per-result subject lines). A small SQLite file (`gui.db`), owned directly
+by the backend, holds saved search prompts and a delete audit log, entirely separate from
+`openbrain-db`. Access is single-user, gated by Traefik basic-auth — no login screen, no per-user
+data model.
+
+```
+              Browser
+                 │  HTTPS, Traefik basic-auth
+                 ▼
+  ┌─────────────────────────────┐
+  │  openbrain-gui               │
+  │  React (Vite) + FastAPI      │──MCP──▶ openbrain-mcp ──▶ openbrain-db
+  │  gui.db (SQLite): prompts,   │──▶ Claude Haiku (subject lines)
+  │  delete log                   │
+  └─────────────────────────────┘
+```
+
+**Status:** built, TDD'd (24 backend tests, plus the 3 new `list_keywords` tests folded into
+`openbrain-mcp`'s 36 above), and manually verified end-to-end in a real browser against a local
+stack. **Not yet deployed to the production VPS** — the Compose service, Traefik labels, and
+required env vars (`OPENBRAIN_GUI_HOST`, `ANTHROPIC_API_KEY`, `GUI_BASIC_AUTH_USERS`) are already
+committed in [`deploy/docker-compose.openbrain.yml`](deploy/docker-compose.openbrain.yml) and
+[`deploy/.env.example`](deploy/.env.example), ready to deploy whenever desired. Its security model
+currently relies solely on Traefik's edge basic-auth (no app-level token of its own, unlike
+`openbrain-mcp`) — a deliberately accepted, revisitable tradeoff for this personal, single-VPS
+deployment.
+
+### Running it locally
+
+```bash
+# Backend
+cd openbrain-gui/backend
+pip install -e ".[dev]"
+OPENBRAIN_MCP_URL=http://localhost:8080/mcp OPENBRAIN_TOKEN=<your local openbrain-mcp token> \
+  ANTHROPIC_API_KEY=<a real key, or any placeholder — falls back to a truncated subject line> \
+  GUI_DB_PATH=/tmp/gui-dev.db python -m uvicorn app.main:app --port 8000
+
+# Frontend (separate terminal)
+cd openbrain-gui/frontend
+npm install
+npm run dev   # http://localhost:5173, proxies /api to :8000
+```
+
+Requires a local `openbrain-mcp` already running (see "Running it locally" above) with its port
+published — the committed compose file doesn't publish it by default; add a temporary
+`docker-compose.override.yml` publishing `8080:8080` for `openbrain-mcp`, same caveat as the
+Postgres port note above.
+
+Run the backend test suite (no live `openbrain-mcp` needed — everything's mocked at the module
+boundary except the SQLite stores, which use real throwaway files):
+
+```bash
+cd openbrain-gui/backend && python -m pytest tests/ -v
+```
 
 ## Related: Hermes Voice (Twilio)
 
