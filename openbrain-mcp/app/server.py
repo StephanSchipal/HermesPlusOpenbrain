@@ -107,6 +107,13 @@ def classify_captures(categories: list[dict], ids: list[str] | None = None) -> l
     with get_conn() as conn:
         return store.classify_captures(conn, categories=categories, ids=ids)
 
+@mcp.tool()
+def list_keywords() -> list[dict]:
+    """List every distinct keyword across all captures with its frequency,
+    most-frequent first. Read-only."""
+    with get_conn() as conn:
+        return store.list_keywords(conn)
+
 class BearerAuthMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         if request.url.path == "/health":
