@@ -32,6 +32,7 @@ data/
 *.db
 models/
 .cache/
+dist/
 
 # Git worktrees
 .worktrees/
