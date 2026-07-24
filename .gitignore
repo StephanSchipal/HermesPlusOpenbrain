@@ -29,6 +29,7 @@ Thumbs.db
 # Local data / model caches
 data/
 *.sqlite
+*.db
 models/
 .cache/
 
