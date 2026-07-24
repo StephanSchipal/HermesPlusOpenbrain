@@ -410,6 +410,36 @@ Vier Fähigkeiten, die als neue MCP-Tools nach dem bestehenden Muster
    `update`-Tool. `metadata`-Rücklesen/-Filtern explizit **nicht** Teil
    dieser Fähigkeit (siehe §7).
 
-Damit sind alle 4 ursprünglich geplanten Fähigkeiten umgesetzt. Details zu
-jeder einzelnen siehe die jeweiligen Spec-/Plan-Dokumente unter
-`docs/superpowers/`.
+5. ✅ **Web-GUI Phase 1** (`openbrain-gui`) — fertig implementiert und
+   gemergt auf `main` am 2026-07-24. Spec:
+   [`docs/superpowers/specs/2026-07-24-openbrain-gui-phase1-design.md`](docs/superpowers/specs/2026-07-24-openbrain-gui-phase1-design.md),
+   Plan:
+   [`docs/superpowers/plans/2026-07-24-openbrain-gui-phase1.md`](docs/superpowers/plans/2026-07-24-openbrain-gui-phase1.md).
+   24/24 neue Backend-Tests grün (`openbrain-gui/backend/tests/`), plus das
+   neue `list_keywords`-Tool in `openbrain-mcp` (36/36 Tests dort grün
+   insgesamt). React-Frontend (Vite) + FastAPI-Backend in einem Container,
+   per Multi-Stage-Dockerfile gebaut — lokal per Docker-Build und
+   Live-Browser-Test Ende-zu-Ende verifiziert (Suche, Ändern, Löschen,
+   Lösch-Log, gespeicherte Prompts, Theme-Umschaltung). Zugriff auf
+   `openbrain-db` ausschließlich über `openbrain-mcp` (wie Claude
+   Desktop/Code) — kein direkter Postgres-Zugriff. Eigene kleine
+   SQLite-Datenbank (`gui.db`) für gespeicherte Prompts und das Lösch-Log,
+   getrennt von `openbrain-db`. Subject-Lines pro Ergebniszeile werden live
+   per Claude Haiku aus der Summary generiert (Fallback: Kürzung der ersten
+   10 Wörter bei API-Fehlern). Einzelbenutzer-Zugriff über Traefik
+   Basic-Auth, kein Login-Screen — bewusst akzeptierter Kompromiss ohne
+   eigene App-Level-Authentifizierung (anders als `openbrain-mcp`), da
+   `openbrain-gui` nur auf demselben privaten VPS-Netz läuft.
+   **Deployment auf den Produktions-VPS steht noch aus** — der
+   Compose-Service, die Traefik-Labels und die nötigen Env-Vars
+   (`OPENBRAIN_GUI_HOST`, `ANTHROPIC_API_KEY`, `GUI_BASIC_AUTH_USERS`) sind
+   bereits in `deploy/docker-compose.openbrain.yml` bzw.
+   `deploy/.env.example` committet und einsatzbereit, sobald das Deployment
+   freigegeben wird. Phase 2 (Wordcloud, AND/OR-Keyword-Suche) und Phase 3
+   (Clustering/Klassifikation in der GUI) sind bewusst nicht Teil dieser
+   Phase — siehe `planGUI.md`.
+
+Damit sind alle 4 ursprünglich geplanten MCP-Fähigkeiten sowie Phase 1 der
+Web-GUI umgesetzt (Web-GUI-Deployment auf den Produktions-VPS noch
+ausständig). Details zu jeder einzelnen siehe die jeweiligen
+Spec-/Plan-Dokumente unter `docs/superpowers/`.
