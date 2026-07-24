@@ -205,9 +205,11 @@ Single page, no router needed — everything fits on one screen per `planGuiProp
   cannot happen given the snapshot-then-delete ordering.
 - **Change/update validation** → empty summary or keyword list rejected client-side before hitting
   the API.
-- **`gui.db` (SQLite) unreachable** (disk/permission issue) → saved-prompts and delete-log features
-  degrade independently with an inline error in just those panels; search/change/delete against
-  `openbrain-mcp` keep working since they don't depend on `gui.db`.
+- **`gui.db` (SQLite) unreachable** (disk/permission issue) → saved-prompts, delete-log, and delete
+  itself all fail loudly (500) — search/change against `openbrain-mcp` are the only interactions
+  that stay independent, since delete's snapshot-then-delete ordering (§3) makes it depend on
+  `gui.db` by design: failing loudly here is preferable to silently skipping the audit-trail write
+  and deleting anyway.
 
 ## 8. Testing
 
