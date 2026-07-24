@@ -1,0 +1,66 @@
+:root {
+  --bg: #1e1e22;
+  --fg: #f0f0f0;
+  --border: #444;
+  --accent: #6c8cff;
+}
+:root[data-theme="light"] {
+  --bg: #ffffff;
+  --fg: #1a1a1a;
+  --border: #ccc;
+  --accent: #3a5ce8;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: system-ui, sans-serif;
+}
+.app { max-width: 1100px; margin: 0 auto; padding: 16px; }
+.app-header { display: flex; justify-content: space-between; align-items: center; }
+.theme-toggle {
+  background: none; border: 1px solid var(--border); border-radius: 4px;
+  padding: 4px 8px; cursor: pointer;
+}
+.stats-line { opacity: 0.8; font-size: 14px; }
+.top-row { display: flex; gap: 16px; margin: 12px 0; }
+.prompt-bar { flex: 2; display: flex; flex-direction: column; gap: 8px; }
+.prompt-dropdown, .prompt-textarea, .keyword-filter {
+  width: 100%; background: var(--bg); color: var(--fg);
+  border: 1px solid var(--border); border-radius: 4px; padding: 6px;
+}
+.prompt-actions { display: flex; gap: 8px; }
+.keyword-panel { flex: 1; display: flex; flex-direction: column; gap: 6px; }
+.keyword-list {
+  max-height: 140px; overflow: auto; display: flex; flex-wrap: wrap;
+  gap: 4px; align-content: flex-start;
+}
+.keyword-chip {
+  border: 1px solid var(--border); background: none; color: var(--fg);
+  border-radius: 12px; padding: 2px 8px; cursor: pointer; font-size: 12px;
+}
+.grid-actions { display: flex; gap: 8px; margin-bottom: 8px; }
+.result-grid { display: flex; flex-direction: column; gap: 6px; }
+.result-row {
+  display: flex; gap: 8px; align-items: flex-start; border: 1px solid var(--border);
+  border-radius: 4px; padding: 8px; cursor: pointer;
+}
+.result-row--readonly { cursor: default; }
+.result-id { opacity: 0.6; font-size: 12px; }
+.result-meta { font-size: 12px; opacity: 0.8; }
+.grid-empty { opacity: 0.6; }
+.popup-overlay {
+  position: fixed; inset: 0; background: rgba(0, 0, 0, 0.5);
+  display: flex; align-items: center; justify-content: center;
+}
+.popup {
+  background: var(--bg); border: 1px solid var(--border); border-radius: 8px;
+  padding: 16px; width: 400px; display: flex; flex-direction: column; gap: 8px;
+}
+.popup textarea, .popup input {
+  width: 100%; background: var(--bg); color: var(--fg);
+  border: 1px solid var(--border); border-radius: 4px; padding: 6px;
+}
+.popup-actions { display: flex; justify-content: flex-end; gap: 8px; }
+button { cursor: pointer; }
