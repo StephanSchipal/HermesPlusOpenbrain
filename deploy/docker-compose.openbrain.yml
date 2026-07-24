@@ -43,8 +43,32 @@ services:
       timeout: 5s
       retries: 3
 
+  openbrain-gui:
+    build: ../openbrain-gui
+    restart: unless-stopped
+    environment:
+      OPENBRAIN_MCP_URL: http://openbrain-mcp:8080/mcp
+      OPENBRAIN_TOKEN: ${OPENBRAIN_TOKEN}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      GUI_DB_PATH: /data/gui.db
+    volumes:
+      - openbrain_gui_data:/data
+    depends_on:
+      - openbrain-mcp
+    networks:
+      - hermes_net   # reaches openbrain-mcp:8080 by container name; NOT on openbrain_internal
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.openbrain-gui.rule=Host(`${OPENBRAIN_GUI_HOST}`)"
+      - "traefik.http.routers.openbrain-gui.entrypoints=websecure"
+      - "traefik.http.routers.openbrain-gui.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.openbrain-gui.middlewares=openbrain-gui-auth"
+      - "traefik.http.middlewares.openbrain-gui-auth.basicauth.users=${GUI_BASIC_AUTH_USERS}"
+      - "traefik.http.services.openbrain-gui.loadbalancer.server.port=8000"
+
 volumes:
   openbrain_pgdata:
+  openbrain_gui_data:
 
 networks:
   openbrain_internal:
