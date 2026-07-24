@@ -35,5 +35,8 @@ models/
 # Git worktrees
 .worktrees/
 
+# Superpowers brainstorming companion (local scratch mockups)
+.superpowers/
+
 # Local Docker Compose overrides
 docker-compose.override.yml
