@@ -54,7 +54,8 @@ services:
     volumes:
       - openbrain_gui_data:/data
     depends_on:
-      - openbrain-mcp
+      openbrain-mcp:
+        condition: service_healthy
     networks:
       - hermes_net   # reaches openbrain-mcp:8080 by container name; NOT on openbrain_internal
     labels:
