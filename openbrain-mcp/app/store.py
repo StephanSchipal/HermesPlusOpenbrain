@@ -180,6 +180,24 @@ def classify_captures(conn: psycopg.Connection, *, categories: list[dict],
         })
     return results
 
+def list_keywords(conn: psycopg.Connection) -> list[dict]:
+    """List every distinct keyword across all captures with its frequency,
+    most-frequent first. Read-only. Aggregates case-insensitively (lowercased)
+    since normalize_keywords() only dedupes within a single capture's own
+    list, not across captures -- without this, "AI" (from one capture) and
+    "ai" (from another) would show up as two separate rows here."""
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT lower(keyword) AS kw, count(*) AS n
+            FROM captures, unnest(keywords) AS keyword
+            GROUP BY kw
+            ORDER BY n DESC, kw ASC
+            """
+        )
+        rows = cur.fetchall()
+    return [{"keyword": r[0], "count": r[1]} for r in rows]
+
 def fetch_recent(conn: psycopg.Connection, *, n: int = 10) -> list[dict]:
     with conn.cursor() as cur:
         cur.execute(

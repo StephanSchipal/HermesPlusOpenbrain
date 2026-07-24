@@ -302,3 +302,42 @@ def test_classify_captures_returns_empty_list_when_nothing_to_classify():
     with get_conn() as conn:
         result = store.classify_captures(conn, categories=_CLASSIFY_CATEGORIES)
     assert result == []
+
+def test_list_keywords_returns_corpus_wide_counts_sorted_by_frequency():
+    _clean()
+    with get_conn() as conn:
+        store.save_capture(conn, raw_text="a", summary="first note about AI agents",
+                           keywords=["ai", "agents"], source="youtube")
+        store.save_capture(conn, raw_text="b", summary="second note about AI safety",
+                           keywords=["ai", "safety"], source="youtube")
+        store.save_capture(conn, raw_text="c", summary="a note about gardening",
+                           keywords=["garden"], source="other")
+    with get_conn() as conn:
+        result = store.list_keywords(conn)
+    assert result[0] == {"keyword": "ai", "count": 2}
+    assert {"keyword": "agents", "count": 1} in result
+    assert {"keyword": "safety", "count": 1} in result
+    assert {"keyword": "garden", "count": 1} in result
+    assert len(result) == 4
+
+def test_list_keywords_aggregates_case_insensitively():
+    _clean()
+    with get_conn() as conn:
+        store.save_capture(conn, raw_text="a", summary="first note about AI agents",
+                           keywords=["AI"], source="other")
+        store.save_capture(conn, raw_text="b", summary="second note about ai safety",
+                           keywords=["ai"], source="other")
+    with get_conn() as conn:
+        result = store.list_keywords(conn)
+    # Two captures tagged "AI"/"ai" collapse into one lowercase entry --
+    # normalize_keywords() only dedupes case-insensitively *within* a single
+    # capture's own keyword list, so across captures "AI" and "ai" would
+    # otherwise show up as two separate rows in a corpus-wide list, which
+    # would look broken in the keyword panel.
+    assert result == [{"keyword": "ai", "count": 2}]
+
+def test_list_keywords_returns_empty_list_for_empty_corpus():
+    _clean()
+    with get_conn() as conn:
+        result = store.list_keywords(conn)
+    assert result == []
