@@ -3,11 +3,17 @@ import { api } from './api.js'
 
 export default function DeleteLogView() {
   const [entries, setEntries] = useState([])
+  const [error, setError] = useState(null)
 
   useEffect(() => {
-    api.getDeleteLog().then(setEntries).catch(() => setEntries([]))
+    api.getDeleteLog()
+      .then((result) => { setEntries(result); setError(null) })
+      .catch((err) => { setEntries([]); setError(err.message) })
   }, [])
 
+  if (error) {
+    return <p className="error-banner">{error}</p>
+  }
   if (entries.length === 0) {
     return <p className="grid-empty">No deletions logged yet.</p>
   }
