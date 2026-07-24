@@ -92,9 +92,16 @@ async def update_capture(capture_id: str, body: UpdateRequest):
         "id": capture_id, "summary": body.summary, "keywords": body.keywords,
     })
     try:
-        return mcp_client.parse_dict_result(result)
+        updated = mcp_client.parse_dict_result(result)
     except OpenBrainMCPError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
+    # Only recompute when summary actually changed -- a keywords-only update
+    # leaves the previously-displayed subject line accurate (design spec
+    # section 6, "Data flow": "Save -> PATCH -> grid row updates in place,
+    # subject line recomputed").
+    if body.summary is not None:
+        updated["subject_line"] = await subject_line.generate_subject_line(body.summary)
+    return updated
 
 @router.get("/prompts")
 def get_prompts():

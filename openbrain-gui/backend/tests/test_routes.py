@@ -86,10 +86,31 @@ def test_update_capture_proxies_mcp_tool(client, monkeypatch):
         assert name == "update"
         assert arguments == {"id": "abc", "summary": "new summary", "keywords": ["x"]}
         return _dict_result({"id": "abc", "updated": True})
+    async def fake_generate_subject_line(summary):
+        assert summary == "new summary"
+        return "New subject line"
     monkeypatch.setattr(mcp_client_module, "call_tool", fake_call_tool)
+    monkeypatch.setattr(subject_line_module, "generate_subject_line", fake_generate_subject_line)
     resp = client.patch("/api/captures/abc", json={"summary": "new summary", "keywords": ["x"]})
     assert resp.status_code == 200
+    assert resp.json() == {"id": "abc", "updated": True, "subject_line": "New subject line"}
+
+def test_update_capture_keywords_only_skips_subject_line(client, monkeypatch):
+    async def fake_call_tool(name, arguments):
+        assert name == "update"
+        assert arguments == {"id": "abc", "summary": None, "keywords": ["x"]}
+        return _dict_result({"id": "abc", "updated": True})
+    calls = []
+    async def fake_generate_subject_line(summary):
+        calls.append(summary)
+        return "should not be called"
+    monkeypatch.setattr(mcp_client_module, "call_tool", fake_call_tool)
+    monkeypatch.setattr(subject_line_module, "generate_subject_line", fake_generate_subject_line)
+    resp = client.patch("/api/captures/abc", json={"keywords": ["x"]})
+    assert resp.status_code == 200
     assert resp.json() == {"id": "abc", "updated": True}
+    assert "subject_line" not in resp.json()
+    assert calls == []
 
 def test_prompts_crud_roundtrip(client):
     created = client.post("/api/prompts", json={"text": "ai agents this week"}).json()

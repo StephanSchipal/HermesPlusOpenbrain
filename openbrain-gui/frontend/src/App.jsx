@@ -20,12 +20,16 @@ export default function App() {
   const promptTextareaRef = useRef(null)
 
   useEffect(() => {
-    api.getStats()
-      .then((result) => { setStats(result); setError(null) })
-      .catch((err) => { setStats(null); setError(err.message) })
-    api.getPrompts()
-      .then((result) => { setSavedPrompts(result); setError(null) })
-      .catch((err) => { setSavedPrompts([]); setError(err.message) })
+    // Resolve both mount-time fetches before touching `error` once -- doing
+    // it per-call let a later success silently clear a genuine earlier
+    // failure (or vice versa) whenever the two requests failed/succeeded in
+    // different orders.
+    Promise.allSettled([api.getStats(), api.getPrompts()]).then(([statsResult, promptsResult]) => {
+      setStats(statsResult.status === 'fulfilled' ? statsResult.value : null)
+      setSavedPrompts(promptsResult.status === 'fulfilled' ? promptsResult.value : [])
+      const failure = [statsResult, promptsResult].find((r) => r.status === 'rejected')
+      setError(failure ? failure.reason.message : null)
+    })
   }, [])
 
   const handleKeywordClick = (keyword) => {
@@ -97,8 +101,14 @@ export default function App() {
 
   const handleChangeSave = async (changes) => {
     try {
-      await api.updateCapture(editingRow.id, changes)
-      setRows((prev) => prev.map((r) => (r.id === editingRow.id ? { ...r, ...changes } : r)))
+      const result = await api.updateCapture(editingRow.id, changes)
+      setRows((prev) =>
+        prev.map((r) =>
+          r.id === editingRow.id
+            ? { ...r, ...changes, ...(result.subject_line ? { subject_line: result.subject_line } : {}) }
+            : r,
+        ),
+      )
       setEditingRow(null)
       setError(null)
     } catch (err) {
