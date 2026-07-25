@@ -63,6 +63,7 @@ body {
 .result-row--readonly { cursor: default; }
 .result-id { opacity: 0.6; font-size: 12px; }
 .result-meta { font-size: 12px; opacity: 0.8; }
+.result-meta a { color: var(--accent); }
 .grid-empty { opacity: 0.6; }
 .popup-overlay {
   position: fixed; inset: 0; background: rgba(0, 0, 0, 0.5);
@@ -70,11 +71,15 @@ body {
 }
 .popup {
   background: var(--bg); border: 1px solid var(--border); border-radius: 8px;
-  padding: 16px; width: 400px; display: flex; flex-direction: column; gap: 8px;
+  padding: 16px; width: 1200px; max-width: 90vw; display: flex; flex-direction: column; gap: 8px;
 }
 .popup textarea, .popup input {
   width: 100%; background: var(--bg); color: var(--fg);
   border: 1px solid var(--border); border-radius: 4px; padding: 6px;
+}
+.popup-summary-text {
+  white-space: pre-wrap; max-height: 60vh; overflow-y: auto; margin: 0;
+  border: 1px solid var(--border); border-radius: 4px; padding: 8px;
 }
 .popup-actions { display: flex; justify-content: flex-end; gap: 8px; }
 button { cursor: pointer; }

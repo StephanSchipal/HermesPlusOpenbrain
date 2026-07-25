@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { api } from './api.js'
+import { formatDateTime } from './format.js'
 
 export default function DeleteLogView() {
   const [entries, setEntries] = useState([])
@@ -24,9 +25,15 @@ export default function DeleteLogView() {
           <span className="result-id">{entry.capture_id.slice(0, 8)}</span>
           <div className="result-body">
             <div className="result-subject">{entry.subject_line}</div>
-            <div className="result-meta">{entry.source_url}</div>
             <div className="result-meta">
-              keywords: {entry.keywords.join(', ')} · deleted {entry.deleted_at}
+              {entry.source_url && (
+                <a href={entry.source_url} target="_blank" rel="noopener noreferrer">
+                  {entry.source_url}
+                </a>
+              )}
+            </div>
+            <div className="result-meta">
+              keywords: {entry.keywords.join(', ')} · deleted {formatDateTime(entry.deleted_at)}
             </div>
           </div>
         </div>

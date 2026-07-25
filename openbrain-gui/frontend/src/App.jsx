@@ -1,11 +1,13 @@
 import { useEffect, useRef, useState } from 'react'
 import { api } from './api.js'
+import { formatDateTime } from './format.js'
 import ThemeToggle from './ThemeToggle.jsx'
 import PromptBar from './PromptBar.jsx'
 import KeywordPanel from './KeywordPanel.jsx'
 import ResultGrid from './ResultGrid.jsx'
 import DeleteLogView from './DeleteLogView.jsx'
 import ChangePopup from './ChangePopup.jsx'
+import SummaryPopup from './SummaryPopup.jsx'
 
 export default function App() {
   const [stats, setStats] = useState(null)
@@ -16,6 +18,7 @@ export default function App() {
   const [selectedId, setSelectedId] = useState(null)
   const [showDeleteLog, setShowDeleteLog] = useState(false)
   const [editingRow, setEditingRow] = useState(null)
+  const [viewingRow, setViewingRow] = useState(null)
   const [error, setError] = useState(null)
   const promptTextareaRef = useRef(null)
 
@@ -57,6 +60,7 @@ export default function App() {
     try {
       const created = await api.savePrompt(prompt)
       setSavedPrompts((prev) => [created, ...prev])
+      setSelectedPromptId(created.id)
       setError(null)
     } catch (err) {
       setError(err.message)
@@ -131,8 +135,8 @@ export default function App() {
         <p className="stats-line">
           {stats.total} captures ·{' '}
           {Object.entries(stats.by_source).map(([src, n]) => `${src}: ${n}`).join(', ')}
-          {stats.first_capture && ` · first: ${stats.first_capture}`}
-          {stats.last_capture && ` · last: ${stats.last_capture}`}
+          {stats.first_capture && ` · first: ${formatDateTime(stats.first_capture)}`}
+          {stats.last_capture && ` · last: ${formatDateTime(stats.last_capture)}`}
         </p>
       )}
 
@@ -152,14 +156,17 @@ export default function App() {
       </div>
 
       <div className="grid-actions">
-        <button onClick={() => setShowDeleteLog((v) => !v)}>
-          {showDeleteLog ? 'Back to results' : 'Show delete log'}
+        <button disabled={!selectedRow} onClick={() => setViewingRow(selectedRow)}>
+          Summary
         </button>
         <button disabled={!selectedRow} onClick={() => setEditingRow(selectedRow)}>
           Change
         </button>
         <button disabled={!selectedRow} onClick={handleDelete}>
           Delete
+        </button>
+        <button onClick={() => setShowDeleteLog((v) => !v)}>
+          {showDeleteLog ? 'Back to results' : 'Show delete log'}
         </button>
       </div>
 
@@ -171,6 +178,9 @@ export default function App() {
 
       {editingRow && (
         <ChangePopup row={editingRow} onSave={handleChangeSave} onClose={() => setEditingRow(null)} />
+      )}
+      {viewingRow && (
+        <SummaryPopup row={viewingRow} onClose={() => setViewingRow(null)} />
       )}
     </div>
   )

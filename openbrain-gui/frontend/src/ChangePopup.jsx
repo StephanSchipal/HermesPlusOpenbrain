@@ -19,7 +19,7 @@ export default function ChangePopup({ row, onSave, onClose }) {
         <h3>Change entry</h3>
         <label>
           Summary
-          <textarea rows={4} value={summary} onChange={(e) => setSummary(e.target.value)} />
+          <textarea rows={12} value={summary} onChange={(e) => setSummary(e.target.value)} />
         </label>
         <label>
           Keywords (comma-separated)

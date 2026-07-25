@@ -24,6 +24,7 @@ export default function PromptBar({
         value={prompt}
         onChange={(e) => onPromptChange(e.target.value)}
         placeholder="Search prompt…"
+        spellCheck={false}
       />
       <div className="prompt-actions">
         <button onClick={onSearch}>Search</button>
