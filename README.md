@@ -159,7 +159,7 @@ openbrain-gui/                # Phase 1 web GUI — see its own section below
       config.py                    # env-var loading
       db.py                         # SQLite connection + schema (prompts, delete_log)
       mcp_client.py                  # openbrain-mcp client wrapper (bearer-token auth)
-      subject_line.py                 # Claude Haiku subject-line generator + truncation fallback
+      subject_line.py                 # subject-line truncation heuristic (no model call)
       prompts_store.py                  # saved-prompts CRUD (SQLite)
       delete_log_store.py                 # delete-log insert/list (SQLite)
       routes.py                             # the /api/* FastAPI routes
@@ -326,12 +326,12 @@ Full details:
 
 **Architecture:** one new container (`openbrain-gui`), combining a Vite-built React SPA (served as
 static files) with a FastAPI backend, built via a multi-stage Dockerfile. The backend is the only
-thing holding secrets (`OPENBRAIN_TOKEN`, an Anthropic API key) and the only thing that talks to
-`openbrain-mcp` — as just another authenticated MCP client, the same way Claude Desktop/Code do —
-or to Claude Haiku (for per-result subject lines). A small SQLite file (`gui.db`), owned directly
-by the backend, holds saved search prompts and a delete audit log, entirely separate from
-`openbrain-db`. Access is single-user, gated by Traefik basic-auth — no login screen, no per-user
-data model.
+thing holding secrets (`OPENBRAIN_TOKEN`) and the only thing that talks to `openbrain-mcp` — as
+just another authenticated MCP client, the same way Claude Desktop/Code do. Per-row subject lines
+are derived by truncating the capture's existing `summary` (already concise, LLM-authored text at
+capture time) — no separate model call. A small SQLite file (`gui.db`), owned directly by the
+backend, holds saved search prompts and a delete audit log, entirely separate from `openbrain-db`.
+Access is single-user, gated by Traefik basic-auth — no login screen, no per-user data model.
 
 ```
               Browser
@@ -340,15 +340,15 @@ data model.
   ┌─────────────────────────────┐
   │  openbrain-gui               │
   │  React (Vite) + FastAPI      │──MCP──▶ openbrain-mcp ──▶ openbrain-db
-  │  gui.db (SQLite): prompts,   │──▶ Claude Haiku (subject lines)
+  │  gui.db (SQLite): prompts,   │
   │  delete log                   │
   └─────────────────────────────┘
 ```
 
-**Status:** built, TDD'd (24 backend tests, plus the 3 new `list_keywords` tests folded into
+**Status:** built, TDD'd (22 backend tests, plus the 3 new `list_keywords` tests folded into
 `openbrain-mcp`'s 36 above), and manually verified end-to-end in a real browser against a local
 stack. **Not yet deployed to the production VPS** — the Compose service, Traefik labels, and
-required env vars (`OPENBRAIN_GUI_HOST`, `ANTHROPIC_API_KEY`, `GUI_BASIC_AUTH_USERS`) are already
+required env vars (`OPENBRAIN_GUI_HOST`, `GUI_BASIC_AUTH_USERS`) are already
 committed in [`deploy/docker-compose.openbrain.yml`](deploy/docker-compose.openbrain.yml) and
 [`deploy/.env.example`](deploy/.env.example), ready to deploy whenever desired. Its security model
 currently relies solely on Traefik's edge basic-auth (no app-level token of its own, unlike
@@ -362,7 +362,6 @@ deployment.
 cd openbrain-gui/backend
 pip install -e ".[dev]"
 OPENBRAIN_MCP_URL=http://localhost:8080/mcp OPENBRAIN_TOKEN=<your local openbrain-mcp token> \
-  ANTHROPIC_API_KEY=<a real key, or any placeholder — falls back to a truncated subject line> \
   GUI_DB_PATH=/tmp/gui-dev.db python -m uvicorn app.main:app --port 8000
 
 # Frontend (separate terminal)

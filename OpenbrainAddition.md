@@ -415,7 +415,7 @@ Vier Fähigkeiten, die als neue MCP-Tools nach dem bestehenden Muster
    [`docs/superpowers/specs/2026-07-24-openbrain-gui-phase1-design.md`](docs/superpowers/specs/2026-07-24-openbrain-gui-phase1-design.md),
    Plan:
    [`docs/superpowers/plans/2026-07-24-openbrain-gui-phase1.md`](docs/superpowers/plans/2026-07-24-openbrain-gui-phase1.md).
-   24/24 neue Backend-Tests grün (`openbrain-gui/backend/tests/`), plus das
+   22/22 neue Backend-Tests grün (`openbrain-gui/backend/tests/`), plus das
    neue `list_keywords`-Tool in `openbrain-mcp` (36/36 Tests dort grün
    insgesamt). React-Frontend (Vite) + FastAPI-Backend in einem Container,
    per Multi-Stage-Dockerfile gebaut — lokal per Docker-Build und
@@ -424,15 +424,18 @@ Vier Fähigkeiten, die als neue MCP-Tools nach dem bestehenden Muster
    `openbrain-db` ausschließlich über `openbrain-mcp` (wie Claude
    Desktop/Code) — kein direkter Postgres-Zugriff. Eigene kleine
    SQLite-Datenbank (`gui.db`) für gespeicherte Prompts und das Lösch-Log,
-   getrennt von `openbrain-db`. Subject-Lines pro Ergebniszeile werden live
-   per Claude Haiku aus der Summary generiert (Fallback: Kürzung der ersten
-   10 Wörter bei API-Fehlern). Einzelbenutzer-Zugriff über Traefik
-   Basic-Auth, kein Login-Screen — bewusst akzeptierter Kompromiss ohne
-   eigene App-Level-Authentifizierung (anders als `openbrain-mcp`), da
+   getrennt von `openbrain-db`. Subject-Lines pro Ergebniszeile werden per
+   einfacher Kürzung der ersten 10 Wörter der bereits vorhandenen Summary
+   erzeugt — kein eigener LLM-Call, da die Summary schon zum Capture-
+   Zeitpunkt von Hermes prägnant formuliert wird (ursprünglich war dafür ein
+   Live-Aufruf von Claude Haiku pro Zeile vorgesehen; nach Praxistest als
+   unnötiger Overhead erkannt und entfernt). Einzelbenutzer-Zugriff über
+   Traefik Basic-Auth, kein Login-Screen — bewusst akzeptierter Kompromiss
+   ohne eigene App-Level-Authentifizierung (anders als `openbrain-mcp`), da
    `openbrain-gui` nur auf demselben privaten VPS-Netz läuft.
    **Deployment auf den Produktions-VPS steht noch aus** — der
    Compose-Service, die Traefik-Labels und die nötigen Env-Vars
-   (`OPENBRAIN_GUI_HOST`, `ANTHROPIC_API_KEY`, `GUI_BASIC_AUTH_USERS`) sind
+   (`OPENBRAIN_GUI_HOST`, `GUI_BASIC_AUTH_USERS`) sind
    bereits in `deploy/docker-compose.openbrain.yml` bzw.
    `deploy/.env.example` committet und einsatzbereit, sobald das Deployment
    freigegeben wird. Phase 2 (Wordcloud, AND/OR-Keyword-Suche) und Phase 3

@@ -2,6 +2,11 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+> **Amendment (2026-07-25):** Task 6's Claude Haiku subject-line generator (below) was replaced
+> post-implementation with plain truncation of the `summary` field — no model call, no Anthropic
+> API key. See the design spec's amendment note for why. This plan's Task 6 text is left as a
+> historical record of what was originally built; it no longer matches the shipped code.
+
 **Goal:** Build a single-user web GUI (React frontend, FastAPI backend) for browsing, searching,
 editing, and deleting `openbrain-db` captures, plus saved search prompts and a delete audit log —
 Phase 1 of the three-phase plan in `planGUI.md`.

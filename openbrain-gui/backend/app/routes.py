@@ -62,11 +62,8 @@ async def search(body: SearchRequest):
         rows = mcp_client.parse_list_result(result)
     except OpenBrainMCPError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
-    # Sequential, not parallel: per-row Claude calls are explicitly allowed
-    # to be slow for Phase 1 (design spec section 3) -- keeping this simple
-    # avoids concurrent-rate-limit surprises for a handful of rows at a time.
     for row in rows:
-        row["subject_line"] = await subject_line.generate_subject_line(row["summary"])
+        row["subject_line"] = subject_line.make_subject_line(row["summary"])
     return rows
 
 @router.post("/captures/{capture_id}/delete")
@@ -100,7 +97,7 @@ async def update_capture(capture_id: str, body: UpdateRequest):
     # section 6, "Data flow": "Save -> PATCH -> grid row updates in place,
     # subject line recomputed").
     if body.summary is not None:
-        updated["subject_line"] = await subject_line.generate_subject_line(body.summary)
+        updated["subject_line"] = subject_line.make_subject_line(body.summary)
     return updated
 
 @router.get("/prompts")

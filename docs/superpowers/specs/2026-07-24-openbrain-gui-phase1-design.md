@@ -4,6 +4,13 @@
 **Author:** Stephan (with Claude Code, brainstorming session 2026-07-24)
 **Status:** Approved design — ready for implementation planning
 
+**Amendment (2026-07-25):** Subject-line generation (§3, §4, §5.2, §6, §7, §8, §9, §10, §12) was
+changed from a live Claude Haiku call per row to plain truncation of the existing `summary` field.
+Real corpus data showed `summary` is already concise, LLM-authored text at capture time — a second
+model call to re-summarize it was redundant overhead (extra latency, an Anthropic API key
+dependency, and the whole per-row timeout/fallback mechanism this spec originally called for). This
+was implemented and shipped the same day, before production deployment.
+
 ---
 
 ## 1. Goal
@@ -35,10 +42,6 @@ Source of truth for the requested layout: `planGuiProposal.png` (Phase 1 wirefra
 - This is a **single-user** tool (confirmed during brainstorming) — no login screen, no per-user
   data model. Traefik basic-auth in front of the whole GUI is the access control boundary, same
   posture as the existing `brain.<vps-host>.hstgr.cloud` MCP endpoint and Hermes' own dashboard.
-- Hermes-Agent is already configured with an Anthropic API key (confirmed by the user) — the GUI
-  backend reuses that same key/provider directly for its own LLM calls, rather than shelling out to
-  the Hermes CLI (which would load full agent context — tools/skills/memory — for a task that needs
-  none of that).
 - Frontend: React. Backend: Python. Both explicitly requested in `planGUI.md`.
 - Deployment target: the same Hostinger VPS (`srv1608402.hstgr.cloud`), alongside the existing
   `hermes-agent`, `openbrain-db`, `openbrain-mcp`, and `traefik` containers.
@@ -50,7 +53,7 @@ Source of truth for the requested layout: `planGuiProposal.png` (Phase 1 wirefra
 | User model | **Single user, Traefik basic-auth** | Confirmed explicitly — this is a personal tool, like the rest of the project. No user table, no app-level login. |
 | Captures DB access | **Always through `openbrain-mcp`, never direct Postgres** | `openbrain-db` is deliberately unreachable except from `openbrain-mcp`; the GUI backend is just another authenticated MCP client. |
 | Small project DB (saved prompts + delete log) | **SQLite, owned directly by the GUI backend** | Personal-scale data, no need for a second Postgres instance to run/back up. Explicitly separate from `openbrain-db` — "all DB access via OpenBrain_MCP" refers to the captures data, not this GUI-local bookkeeping. |
-| Subject-line generation | **Real LLM call per row, using Hermes' existing Anthropic API key directly (not the Hermes CLI)** | User confirmed "slow is fine for Phase 1." Calling the model directly (not `hermes chat`) avoids loading full agent tools/skills/memory for a plain text-in/text-out task, and avoids side effects from a supposedly read-only GUI action. |
+| Subject-line generation | **Plain truncation of the existing `summary` field, no model call** *(amended 2026-07-25, see top of doc)* | `summary` is already concise, LLM-authored text written at capture time — a live per-row Haiku call to re-summarize it was redundant. Removes an Anthropic API key dependency and all per-row-latency/timeout/fallback complexity. |
 | Initial page load | **`stats()` summary only; Result grid stays empty until Search** | User explicitly chose this over auto-populating the grid with recent captures. |
 | Keyword panel scope | **Whole corpus, by frequency, with a filter textbox** | Confirmed — also lays groundwork for the Phase 2 word cloud, which needs the same data. Requires the new `list_keywords()` tool. |
 | Saved prompts | **No separate name field — dropdown label is the truncated prompt text** | Fastest to use for a single-user tool; avoids an extra step on every save. |
@@ -74,8 +77,6 @@ Source of truth for the requested layout: `planGuiProposal.png` (Phase 1 wirefra
   │ openbrain-gui-backend        │──MCP──▶│ openbrain-mcp │──▶ openbrain-db (Postgres)
   │ NEW — FastAPI (Python)       │ bearer │  (existing)   │     (existing, untouched)
   │  - holds OPENBRAIN_TOKEN     │ token  └──────────────┘
-  │  - holds Anthropic API key   │
-  │    (same one Hermes uses)    │──▶ Claude Haiku (subject lines)
   │  - owns gui.db (SQLite)      │
   │    saved prompts + delete log│
   └─────────────────────────────┘
@@ -86,8 +87,8 @@ hostname/route, one new Docker volume (for `gui.db`). Nothing about the existing
 `hermes-agent`/`openbrain-db`/`openbrain-mcp`/`traefik` stack changes except `openbrain-mcp`
 gaining its 11th tool.
 
-The frontend never holds `OPENBRAIN_TOKEN` or the Anthropic key — only the backend does. The
-frontend only ever talks to the GUI backend's own `/api/*` routes.
+The frontend never holds `OPENBRAIN_TOKEN` — only the backend does. The frontend only ever talks to
+the GUI backend's own `/api/*` routes.
 
 ## 5. Components
 
@@ -131,7 +132,7 @@ still gets its own tests in `openbrain-mcp/tests/` and its own entry in `README.
 |---|---|
 | `GET /api/stats` | Proxies `stats()`. Powers the initial-load view. |
 | `GET /api/keywords?filter=` | Proxies `list_keywords()`; filters by case-insensitive substring match server-side. |
-| `POST /api/search {query, k?}` | Proxies `search(query, k)`; `k` defaults to 25 if omitted (vs. the underlying tool's own default of 5 — a GUI browsing view wants more results per search than a chat-style single answer). For each returned row, calls Claude Haiku once to derive `subject_line` from `summary` (falls back to a truncation heuristic per-row on failure — see §7). |
+| `POST /api/search {query, k?}` | Proxies `search(query, k)`; `k` defaults to 25 if omitted (vs. the underlying tool's own default of 5 — a GUI browsing view wants more results per search than a chat-style single answer). For each returned row, derives `subject_line` by truncating `summary` to its first ~10 words. |
 | `POST /api/captures/{id}/delete` | Snapshots the row (subject line, keywords, source_url, created_at, deletion timestamp) into `gui.db`'s delete log, **then** calls `delete(id)`. |
 | `PATCH /api/captures/{id} {summary?, keywords?}` | Proxies `update(id, summary, keywords)`. |
 | `GET /api/prompts` / `POST /api/prompts {text}` / `DELETE /api/prompts/{id}` | CRUD on saved prompts in `gui.db`. No MCP call involved — this is GUI-local bookkeeping, not capture data. |
@@ -181,7 +182,7 @@ Single page, no router needed — everything fits on one screen per `planGuiProp
 - **Load:** frontend calls `GET /api/stats` and `GET /api/keywords` (empty filter) on mount →
   renders the stats line and full keyword panel. Grid stays empty until a search runs.
 - **Search:** user types or selects a saved prompt, clicks Search → `POST /api/search` → backend
-  calls `search()`, then one Claude Haiku call per row for `subject_line` → grid renders.
+  calls `search()`, then truncates each row's `summary` into `subject_line` → grid renders.
 - **Keyword click:** inserts the keyword into the prompt textarea at the cursor position; the user
   still has to click Search to act on it.
 - **Keyword filter:** debounced `GET /api/keywords?filter=` re-renders the keyword panel.
@@ -196,9 +197,6 @@ Single page, no router needed — everything fits on one screen per `planGuiProp
 
 - **`openbrain-mcp` unreachable or returns 401** → backend returns 502 to the frontend; frontend
   shows a banner instead of a blank/silently-failing grid.
-- **Claude Haiku call fails or times out for a given row** → that row falls back to a
-  truncated-summary heuristic (first ~10 words); the rest of the grid still renders normally — one
-  slow/failed row must not block the whole search.
 - **Delete: MCP call fails after the log snapshot was written** → worst case is an orphan log entry
   with no matching deletion; logged server-side as a warning, not surfaced to the user as an error
   (best-effort audit trail, not a source of truth). The reverse — a deletion with no log entry —
@@ -217,10 +215,10 @@ Single page, no router needed — everything fits on one screen per `planGuiProp
   `openbrain-test-db`), following `openbrain-mcp/tests/` conventions: empty corpus → `[]`; known
   keyword distribution → correct counts and descending sort order; case handling consistent with
   `normalize_keywords()`.
-- **`openbrain-gui-backend`** — unit tests with the MCP client and Anthropic calls mocked: route
-  behavior, snapshot-before-delete ordering, keyword filter logic, SQLite CRUD for prompts and the
-  delete log. One thin integration test against a real local `openbrain-mcp` + test DB, mirroring
-  the manual smoke tests done for the last 4 MCP capabilities.
+- **`openbrain-gui-backend`** — unit tests with the MCP client mocked: route behavior,
+  snapshot-before-delete ordering, keyword filter logic, subject-line truncation, SQLite CRUD for
+  prompts and the delete log. One thin integration test against a real local `openbrain-mcp` + test
+  DB, mirroring the manual smoke tests done for the last 4 MCP capabilities.
 - **`openbrain-gui-frontend`** — no automated test suite planned for Phase 1 (single-user, one
   screen) — verified by manual exercise against the local dev stack in a real browser, consistent
   with this project's existing "run it, click through it" verification norm for UI-facing work.
@@ -233,8 +231,7 @@ Single page, no router needed — everything fits on one screen per `planGuiProp
   `openbrain-gui`, built from a new `openbrain-gui/` directory in the repo — multi-stage Dockerfile
   (build the React app, copy the static output into the FastAPI image).
 - New env vars in `deploy/.env`: reuses the existing `OPENBRAIN_TOKEN` (the GUI backend is just
-  another authenticated MCP client) + `ANTHROPIC_API_KEY` (same key Hermes uses) + Traefik
-  basic-auth credentials.
+  another authenticated MCP client) + Traefik basic-auth credentials.
 - `gui.db` (SQLite) on its own small persistent Docker volume, separate from `openbrain-db`'s
   volume.
 
@@ -245,8 +242,8 @@ Single page, no router needed — everything fits on one screen per `planGuiProp
 - No clustering/classification UI (Phase 3).
 - No creating new captures from the GUI (`save` is not exposed) — captures are only ever created
   via Hermes/WhatsApp.
-- No caching of generated subject lines — recomputed on every render, matching the user's explicit
-  "slow is fine for Phase 1."
+- No caching of subject lines — recomputed on every render; cheap since it's pure truncation, no
+  model call.
 - No read/write token scoping on `OPENBRAIN_TOKEN` (the README already flags this as a deferred
   hardening item generally) — the GUI backend reuses the single existing token.
 - No restore/undelete from the delete log.
@@ -270,7 +267,7 @@ Single page, no router needed — everything fits on one screen per `planGuiProp
    small TDD cycle, mirroring the last 4 capabilities.
 2. Scaffold `openbrain-gui-backend` (FastAPI project, MCP client wiring, SQLite schema for
    `prompts`/`delete_log`).
-3. Implement backend routes (§5.2) with unit tests (mocked MCP/Anthropic calls).
+3. Implement backend routes (§5.2) with unit tests (mocked MCP calls).
 4. Scaffold `openbrain-gui-frontend` (Vite + React project, component skeletons from §5.3).
 5. Wire frontend components to backend routes; implement theme toggle (`localStorage`).
 6. Multi-stage Dockerfile combining frontend build + backend; local Docker Compose smoke test.
