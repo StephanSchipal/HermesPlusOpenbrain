@@ -30,3 +30,14 @@ def test_list_deletions_newest_first(tmp_path):
     )
     entries = delete_log_store.list_deletions(path=db_path)
     assert [e["capture_id"] for e in entries] == ["second", "first"]
+
+def test_list_deletions_respects_limit(tmp_path):
+    db_path = str(tmp_path / "gui.db")
+    init_db(db_path)
+    for capture_id in ["first", "second", "third"]:
+        delete_log_store.log_deletion(
+            capture_id=capture_id, subject_line=None, keywords=[], source_url=None,
+            captured_at=None, path=db_path,
+        )
+    entries = delete_log_store.list_deletions(path=db_path, limit=2)
+    assert [e["capture_id"] for e in entries] == ["third", "second"]

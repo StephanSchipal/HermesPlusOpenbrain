@@ -15,6 +15,11 @@ def create_app() -> FastAPI:
     init_db()
     app = FastAPI(title="openbrain-gui-backend")
     app.include_router(api_router)
+
+    @app.get("/health")
+    def health():
+        return {"ok": True}
+
     if _STATIC_DIR.is_dir():
         app.mount("/", StaticFiles(directory=str(_STATIC_DIR), html=True), name="frontend")
     return app

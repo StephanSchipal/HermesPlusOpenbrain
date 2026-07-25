@@ -9,17 +9,22 @@ import DeleteLogView from './DeleteLogView.jsx'
 import ChangePopup from './ChangePopup.jsx'
 import SummaryPopup from './SummaryPopup.jsx'
 
+const SEARCH_PAGE_SIZE = 25
+
 export default function App() {
   const [stats, setStats] = useState(null)
   const [prompt, setPrompt] = useState('')
   const [savedPrompts, setSavedPrompts] = useState([])
   const [selectedPromptId, setSelectedPromptId] = useState('')
   const [rows, setRows] = useState([])
+  const [searchK, setSearchK] = useState(SEARCH_PAGE_SIZE)
+  const [searching, setSearching] = useState(false)
   const [selectedId, setSelectedId] = useState(null)
   const [showDeleteLog, setShowDeleteLog] = useState(false)
   const [editingRow, setEditingRow] = useState(null)
   const [viewingRow, setViewingRow] = useState(null)
   const [error, setError] = useState(null)
+  const [notice, setNotice] = useState(null)
   const promptTextareaRef = useRef(null)
 
   useEffect(() => {
@@ -35,6 +40,11 @@ export default function App() {
     })
   }, [])
 
+  const showNotice = (message) => {
+    setNotice(message)
+    setTimeout(() => setNotice(null), 3000)
+  }
+
   const handleKeywordClick = (keyword) => {
     const el = promptTextareaRef.current
     const start = el?.selectionStart ?? prompt.length
@@ -42,18 +52,28 @@ export default function App() {
     setPrompt(prompt.slice(0, start) + keyword + prompt.slice(end))
   }
 
-  const handleSearch = async () => {
-    if (!prompt.trim()) return
+  const runSearch = async (k) => {
+    setSearching(true)
     try {
-      const results = await api.search(prompt)
+      const results = await api.search(prompt, k)
       setRows(results)
-      setSelectedId(null)
-      setShowDeleteLog(false)
+      setSearchK(k)
       setError(null)
     } catch (err) {
       setError(err.message)
+    } finally {
+      setSearching(false)
     }
   }
+
+  const handleSearch = async () => {
+    if (!prompt.trim()) return
+    setSelectedId(null)
+    setShowDeleteLog(false)
+    await runSearch(SEARCH_PAGE_SIZE)
+  }
+
+  const handleLoadMore = () => runSearch(searchK + SEARCH_PAGE_SIZE)
 
   const handleSavePrompt = async () => {
     if (!prompt.trim()) return
@@ -98,6 +118,7 @@ export default function App() {
       setRows((prev) => prev.filter((r) => r.id !== row.id))
       setSelectedId(null)
       setError(null)
+      showNotice('Capture deleted.')
     } catch (err) {
       setError(err.message)
     }
@@ -121,6 +142,7 @@ export default function App() {
   }
 
   const selectedRow = rows.find((r) => r.id === selectedId)
+  const canLoadMore = !showDeleteLog && rows.length > 0 && rows.length >= searchK
 
   return (
     <div className="app">
@@ -130,6 +152,7 @@ export default function App() {
       </header>
 
       {error && <p className="error-banner">{error}</p>}
+      {notice && <p className="notice-banner">{notice}</p>}
 
       {stats && (
         <p className="stats-line">
@@ -151,6 +174,7 @@ export default function App() {
           onSearch={handleSearch}
           onSavePrompt={handleSavePrompt}
           onDeleteSavedPrompt={handleDeleteSavedPrompt}
+          searching={searching}
         />
         <KeywordPanel onKeywordClick={handleKeywordClick} />
       </div>
@@ -172,8 +196,16 @@ export default function App() {
 
       {showDeleteLog ? (
         <DeleteLogView />
+      ) : searching ? (
+        <p className="grid-empty">Searching…</p>
       ) : (
         <ResultGrid rows={rows} selectedId={selectedId} onSelect={setSelectedId} />
+      )}
+
+      {canLoadMore && (
+        <button className="load-more" onClick={handleLoadMore} disabled={searching}>
+          Load more
+        </button>
       )}
 
       {editingRow && (

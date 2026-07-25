@@ -8,7 +8,7 @@ from pydantic import BaseModel
 
 from app import mcp_client, prompts_store, delete_log_store, subject_line
 from app.mcp_client import OpenBrainMCPError
-from app.config import DEFAULT_SEARCH_K
+from app.config import DEFAULT_SEARCH_K, DEFAULT_DELETE_LOG_LIMIT
 
 router = APIRouter(prefix="/api")
 
@@ -116,5 +116,5 @@ def delete_prompt(prompt_id: int):
     return {"id": prompt_id, "deleted": True}
 
 @router.get("/delete-log")
-def get_delete_log():
-    return delete_log_store.list_deletions()
+def get_delete_log(limit: int = DEFAULT_DELETE_LOG_LIMIT):
+    return delete_log_store.list_deletions(limit=limit)

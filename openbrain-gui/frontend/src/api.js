@@ -24,5 +24,5 @@ export const api = {
   getPrompts: () => request('/prompts'),
   savePrompt: (text) => request('/prompts', { method: 'POST', body: JSON.stringify({ text }) }),
   deletePrompt: (id) => request(`/prompts/${id}`, { method: 'DELETE' }),
-  getDeleteLog: () => request('/delete-log'),
+  getDeleteLog: (limit) => request(`/delete-log${limit ? `?limit=${limit}` : ''}`),
 }

@@ -117,3 +117,17 @@ def test_mcp_connection_failure_returns_502(client, monkeypatch):
     monkeypatch.setattr(mcp_client_module, "call_tool", fake_call_tool)
     resp = client.get("/api/stats")
     assert resp.status_code == 502
+
+def test_health_endpoint(client):
+    resp = client.get("/health")
+    assert resp.status_code == 200
+    assert resp.json() == {"ok": True}
+
+def test_delete_log_respects_limit(client, monkeypatch):
+    async def fake_call_tool(name, arguments):
+        return _dict_result({"id": "abc", "deleted": True})
+    monkeypatch.setattr(mcp_client_module, "call_tool", fake_call_tool)
+    for capture_id in ["a", "b", "c"]:
+        client.post(f"/api/captures/{capture_id}/delete", json={"keywords": []})
+    log = client.get("/api/delete-log", params={"limit": 2}).json()
+    assert [entry["capture_id"] for entry in log] == ["c", "b"]

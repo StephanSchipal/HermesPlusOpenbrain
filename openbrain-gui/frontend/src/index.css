@@ -38,6 +38,20 @@ body {
   border-color: #d33;
   color: #900;
 }
+.notice-banner {
+  background: #1f4a2a;
+  border: 1px solid #3a3;
+  color: #bfb;
+  border-radius: 4px;
+  padding: 8px 12px;
+  font-size: 14px;
+  margin: 8px 0;
+}
+:root[data-theme="light"] .notice-banner {
+  background: #eafdea;
+  border-color: #3a3;
+  color: #060;
+}
 .top-row { display: flex; gap: 16px; margin: 12px 0; }
 .prompt-bar { flex: 2; display: flex; flex-direction: column; gap: 8px; }
 .prompt-dropdown, .prompt-textarea, .keyword-filter {
@@ -45,6 +59,14 @@ body {
   border: 1px solid var(--border); border-radius: 4px; padding: 6px;
 }
 .prompt-actions { display: flex; gap: 8px; }
+.textarea-wrapper { position: relative; }
+.textarea-wrapper .prompt-textarea { padding-right: 26px; }
+.textarea-clear {
+  position: absolute; top: 6px; right: 6px; background: none; border: none;
+  color: var(--fg); opacity: 0.5; cursor: pointer; font-size: 13px; line-height: 1;
+  padding: 2px;
+}
+.textarea-clear:hover { opacity: 1; }
 .keyword-panel { flex: 1; display: flex; flex-direction: column; gap: 6px; }
 .keyword-list {
   max-height: 140px; overflow: auto; display: flex; flex-wrap: wrap;
@@ -65,6 +87,10 @@ body {
 .result-meta { font-size: 12px; opacity: 0.8; }
 .result-meta a { color: var(--accent); }
 .grid-empty { opacity: 0.6; }
+.load-more {
+  margin-top: 8px; background: none; color: var(--fg);
+  border: 1px solid var(--border); border-radius: 4px; padding: 6px 12px;
+}
 .popup-overlay {
   position: fixed; inset: 0; background: rgba(0, 0, 0, 0.5);
   display: flex; align-items: center; justify-content: center;

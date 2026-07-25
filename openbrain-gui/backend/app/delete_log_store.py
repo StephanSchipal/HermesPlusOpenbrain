@@ -24,14 +24,17 @@ def log_deletion(*, capture_id: str, subject_line: str | None, keywords: list[st
         conn.commit()
         return {"id": cur.lastrowid, "capture_id": capture_id, "deleted_at": deleted_at}
 
-def list_deletions(*, path: str | None = None) -> list[dict]:
+def list_deletions(*, path: str | None = None, limit: int | None = None) -> list[dict]:
+    query = """
+        SELECT id, capture_id, subject_line, keywords, source_url, captured_at, deleted_at
+        FROM delete_log ORDER BY deleted_at DESC, id DESC
+    """
+    params: tuple = ()
+    if limit is not None:
+        query += " LIMIT ?"
+        params = (limit,)
     with get_conn(path) as conn:
-        rows = conn.execute(
-            """
-            SELECT id, capture_id, subject_line, keywords, source_url, captured_at, deleted_at
-            FROM delete_log ORDER BY deleted_at DESC, id DESC
-            """
-        ).fetchall()
+        rows = conn.execute(query, params).fetchall()
     return [
         {**dict(row), "keywords": json.loads(row["keywords"] or "[]")}
         for row in rows

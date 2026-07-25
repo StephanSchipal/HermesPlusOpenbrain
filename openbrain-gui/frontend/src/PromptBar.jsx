@@ -2,7 +2,15 @@ export default function PromptBar({
   prompt, onPromptChange, promptTextareaRef,
   savedPrompts, onSelectSavedPrompt,
   onSearch, onSavePrompt, onDeleteSavedPrompt, selectedPromptId,
+  searching,
 }) {
+  const handleKeyDown = (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault()
+      onSearch()
+    }
+  }
+
   return (
     <div className="prompt-bar">
       <select
@@ -17,17 +25,32 @@ export default function PromptBar({
           </option>
         ))}
       </select>
-      <textarea
-        ref={promptTextareaRef}
-        className="prompt-textarea"
-        rows={3}
-        value={prompt}
-        onChange={(e) => onPromptChange(e.target.value)}
-        placeholder="Search prompt…"
-        spellCheck={false}
-      />
+      <div className="textarea-wrapper">
+        <textarea
+          ref={promptTextareaRef}
+          className="prompt-textarea"
+          rows={3}
+          value={prompt}
+          onChange={(e) => onPromptChange(e.target.value)}
+          onKeyDown={handleKeyDown}
+          placeholder="Search prompt…"
+          spellCheck={false}
+        />
+        {prompt && (
+          <button
+            type="button"
+            className="textarea-clear"
+            aria-label="Clear prompt"
+            onClick={() => onPromptChange('')}
+          >
+            ✕
+          </button>
+        )}
+      </div>
       <div className="prompt-actions">
-        <button onClick={onSearch}>Search</button>
+        <button onClick={onSearch} disabled={searching}>
+          {searching ? 'Searching…' : 'Search'}
+        </button>
         <button onClick={onSavePrompt}>Save prompt</button>
         <button onClick={onDeleteSavedPrompt} disabled={!selectedPromptId}>
           Delete prompt
