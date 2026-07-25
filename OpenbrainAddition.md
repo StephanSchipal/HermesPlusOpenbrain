@@ -433,16 +433,19 @@ Vier Fähigkeiten, die als neue MCP-Tools nach dem bestehenden Muster
    Traefik Basic-Auth, kein Login-Screen — bewusst akzeptierter Kompromiss
    ohne eigene App-Level-Authentifizierung (anders als `openbrain-mcp`), da
    `openbrain-gui` nur auf demselben privaten VPS-Netz läuft.
-   **Deployment auf den Produktions-VPS steht noch aus** — der
-   Compose-Service, die Traefik-Labels und die nötigen Env-Vars
-   (`OPENBRAIN_GUI_HOST`, `GUI_BASIC_AUTH_USERS`) sind
-   bereits in `deploy/docker-compose.openbrain.yml` bzw.
-   `deploy/.env.example` committet und einsatzbereit, sobald das Deployment
-   freigegeben wird. Phase 2 (Wordcloud, AND/OR-Keyword-Suche) und Phase 3
+   **Live seit 2026-07-25** unter `https://gui.<vps-host>.hstgr.cloud`,
+   Compose-Service + Traefik-Labels + Env-Vars (`OPENBRAIN_GUI_HOST`,
+   `GUI_BASIC_AUTH_USERS`) in `deploy/docker-compose.openbrain.yml` bzw.
+   `deploy/.env.example` committet. Nach dem Go-Live noch auf
+   Praxis-Feedback angepasst: Datums-Anzeige lesbarer formatiert, Change-
+   Popup vergrößert, neuer Read-only "Summary"-Button/Popup, Relevanz-Score
+   pro Ergebnis sichtbar (statt eines blind geratenen Cutoffs — Kalibrierung
+   zeigte, dass ein fester Schwellwert bei diesem thematisch engen Corpus
+   keine sauberen Treffer/Nicht-Treffer trennt), Quell-URLs als klickbare
+   Links. Phase 2 (Wordcloud, AND/OR-Keyword-Suche) und Phase 3
    (Clustering/Klassifikation in der GUI) sind bewusst nicht Teil dieser
    Phase — siehe `planGUI.md`.
 
 Damit sind alle 4 ursprünglich geplanten MCP-Fähigkeiten sowie Phase 1 der
-Web-GUI umgesetzt (Web-GUI-Deployment auf den Produktions-VPS noch
-ausständig). Details zu jeder einzelnen siehe die jeweiligen
-Spec-/Plan-Dokumente unter `docs/superpowers/`.
+Web-GUI umgesetzt und deployed. Details zu jeder einzelnen siehe die
+jeweiligen Spec-/Plan-Dokumente unter `docs/superpowers/`.

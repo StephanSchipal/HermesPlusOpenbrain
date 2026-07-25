@@ -346,14 +346,11 @@ Access is single-user, gated by Traefik basic-auth — no login screen, no per-u
 ```
 
 **Status:** built, TDD'd (22 backend tests, plus the 3 new `list_keywords` tests folded into
-`openbrain-mcp`'s 36 above), and manually verified end-to-end in a real browser against a local
-stack. **Not yet deployed to the production VPS** — the Compose service, Traefik labels, and
-required env vars (`OPENBRAIN_GUI_HOST`, `GUI_BASIC_AUTH_USERS`) are already
-committed in [`deploy/docker-compose.openbrain.yml`](deploy/docker-compose.openbrain.yml) and
-[`deploy/.env.example`](deploy/.env.example), ready to deploy whenever desired. Its security model
-currently relies solely on Traefik's edge basic-auth (no app-level token of its own, unlike
-`openbrain-mcp`) — a deliberately accepted, revisitable tradeoff for this personal, single-VPS
-deployment.
+`openbrain-mcp`'s 36 above), and **live since 2026-07-25** at
+`https://gui.<vps-host>.hstgr.cloud`, behind Traefik basic-auth (single credential pair in
+`deploy/.env`'s `GUI_BASIC_AUTH_USERS`). Its security model relies solely on Traefik's edge
+basic-auth (no app-level token of its own, unlike `openbrain-mcp`) — a deliberately accepted,
+revisitable tradeoff for this personal, single-VPS deployment.
 
 ### Running it locally
 
