@@ -88,17 +88,22 @@ def build_keyword_graph(captures: list[dict], clusters: list[dict]) -> dict:
 ```
 
 Algorithm:
-1. Build `capture_id -> cluster_id` and `capture_id -> central` maps from `clusters`.
-2. For each capture (from `list_recent`), look up its `cluster_id`; skip captures with no match.
-3. For each `(cluster_id, keyword)` pair, tally occurrences. A keyword's overall `cluster_id` is
-   the cluster where it occurs most often (ties broken by the lowest `cluster_id`).
-4. A cluster's `label` is the keyword with the highest occurrence count *restricted to that
+1. Build `capture_id -> {"cluster_id", "central", "subject_line"}` from `clusters`'s members —
+   `subject_line` via the existing `subject_line.make_subject_line(member["summary"])`, for display
+   consistency with the rest of the GUI (tooltips, not the graph nodes themselves, show capture
+   text). `cluster_captures` already returns members nearest-centroid-first, so a cluster's
+   `captures` list built by filtering this map naturally keeps `central: true` entries first — no
+   extra sorting needed.
+2. Build `capture_id -> keywords` from `captures` (`list_recent`'s own `keywords` field). Capture
+   ids present in one input but not the other (§2, race between the two MCP calls) are skipped.
+3. For each capture, and for each of its keywords, tally occurrences per `(keyword, cluster_id)`
+   pair, and append that capture's `{"id", "subject_line", "central"}` to the keyword's own
+   `captures` list (so hovering a *keyword* shows the captures that actually contain it — not just
+   every capture in its cluster).
+4. A keyword's overall `cluster_id` is the cluster where it occurs most often (ties broken by the
+   lowest `cluster_id`); its `count` is its total occurrences across all clusters.
+5. A cluster's `label` is the keyword with the highest occurrence count *restricted to that
    cluster's own captures* (ties broken alphabetically).
-5. Each cluster's `captures` list holds `{"id", "subject_line", "central"}` — `subject_line` via
-   the existing `subject_line.make_subject_line()`, for display consistency with the rest of the
-   GUI (tooltips, not the graph nodes themselves, show capture text). `cluster_captures` already
-   returns members nearest-centroid-first, so `central: true` entries naturally come first in this
-   list too — no extra sorting needed.
 
 **`app/config.py`**: add `GRAPH_MAX_CAPTURES = 100_000` — effectively unbounded for a personal-
 scale corpus; named so it isn't a bare magic number in `routes.py`.
@@ -120,7 +125,8 @@ scale corpus; named so it isn't a bare magic number in `routes.py`.
      "captures": [{"id": "...", "subject_line": "...", "central": true}, ...]}
   ],
   "keywords": [
-    {"keyword": "claude", "count": 4, "cluster_id": 0}
+    {"keyword": "claude", "count": 4, "cluster_id": 0,
+     "captures": [{"id": "...", "subject_line": "...", "central": true}, ...]}
   ]
 }
 ```
