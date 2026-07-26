@@ -63,8 +63,10 @@ def search_captures(conn: psycopg.Connection, *, query: str | None = None,
     "and" (every given keyword present) or "or" (any given keyword present);
     keyword matching is case-insensitive since `keywords` is stored
     case-preserving (see `normalize_keywords`)."""
-    if keyword_mode not in ("and", "or"):
-        return {"error": f"keyword_mode must be 'and' or 'or', got {keyword_mode!r}"}
+    if (error := _validate_keyword_mode(keyword_mode)) is not None:
+        return error
+    if (query is None) == (capture_id is None):
+        return {"error": "exactly one of query or capture_id must be given"}
 
     emb = embed_query(query)
     where_clauses, where_params = _build_filter_clause(
@@ -73,6 +75,9 @@ def search_captures(conn: psycopg.Connection, *, query: str | None = None,
     )
     where_sql = f"WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
     with conn.cursor() as cur:
+        # where_sql is built from static column-name/operator literals chosen
+        # in code (never from caller-supplied strings); all caller-supplied
+        # values travel as parameters below -> injection-safe.
         cur.execute(
             f"""
             SELECT id, summary, keywords, source, source_url, lang, created_at,
@@ -87,11 +92,18 @@ def search_captures(conn: psycopg.Connection, *, query: str | None = None,
         rows = cur.fetchall()
     return [_row_to_result(r) for r in rows]
 
+def _validate_keyword_mode(keyword_mode: str) -> dict | None:
+    """Returns an {"error": ...} dict if keyword_mode isn't "and"/"or", else None."""
+    if keyword_mode not in ("and", "or"):
+        return {"error": f"keyword_mode must be 'and' or 'or', got {keyword_mode!r}"}
+    return None
+
 def _build_filter_clause(*, source: str | None, date_from: str | None, date_to: str | None,
                          keywords: list[str] | None, keyword_mode: str) -> tuple[list[str], list]:
-    """Shared by search_captures and fetch_recent: builds the WHERE-clause
-    fragments and their parameters for the source/date/keyword filters. Does
-    NOT validate keyword_mode -- callers already did that before this runs."""
+    """Will be shared by search_captures and (from Task 3) fetch_recent:
+    builds the WHERE-clause fragments and their parameters for the
+    source/date/keyword filters. Does NOT validate keyword_mode -- callers
+    already did that before this runs."""
     clauses: list[str] = []
     params: list = []
     if source is not None:

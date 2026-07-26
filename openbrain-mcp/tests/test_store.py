@@ -423,3 +423,9 @@ def test_search_captures_rejects_invalid_keyword_mode():
     with get_conn() as conn:
         result = store.search_captures(conn, query="anything", keyword_mode="xor")
     assert result == {"error": "keyword_mode must be 'and' or 'or', got 'xor'"}
+
+def test_search_captures_rejects_neither_query_nor_capture_id():
+    _clean()
+    with get_conn() as conn:
+        result = store.search_captures(conn)
+    assert result == {"error": "exactly one of query or capture_id must be given"}
