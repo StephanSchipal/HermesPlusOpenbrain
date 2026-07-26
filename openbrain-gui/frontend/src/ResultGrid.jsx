@@ -40,40 +40,40 @@ export default function ResultGrid({ rows, selectedId, onSelect, onFindSimilar, 
       {rows.length === 0 ? (
         <p className="grid-empty">No results match your search.</p>
       ) : (
-      <div className="result-grid">
-        {sortedRows.map((row) => (
-          <label key={row.id} className="result-row">
-            <input
-              type="radio"
-              name="result-row"
-              checked={selectedId === row.id}
-              onChange={() => onSelect(row.id)}
-            />
-            <span className="result-id">{row.id.slice(0, 8)}</span>
-            <div className="result-body">
-              <div className="result-subject">{row.subject_line}</div>
-              <div className="result-meta">
-                {row.source_url && (
-                  <a href={row.source_url} target="_blank" rel="noopener noreferrer">
-                    {row.source_url}
-                  </a>
-                )}
+        <div className="result-grid">
+          {sortedRows.map((row) => (
+            <label key={row.id} className="result-row">
+              <input
+                type="radio"
+                name="result-row"
+                checked={selectedId === row.id}
+                onChange={() => onSelect(row.id)}
+              />
+              <span className="result-id">{row.id.slice(0, 8)}</span>
+              <div className="result-body">
+                <div className="result-subject">{row.subject_line}</div>
+                <div className="result-meta">
+                  {row.source_url && (
+                    <a href={row.source_url} target="_blank" rel="noopener noreferrer">
+                      {row.source_url}
+                    </a>
+                  )}
+                </div>
+                <div className="result-meta">
+                  {formatDateTime(row.created_at)} · keywords: {row.keywords.join(', ')}
+                  {row.score != null && ` · relevance: ${Math.round(row.score * 100)}%`}
+                </div>
               </div>
-              <div className="result-meta">
-                {formatDateTime(row.created_at)} · keywords: {row.keywords.join(', ')}
-                {row.score != null && ` · relevance: ${Math.round(row.score * 100)}%`}
-              </div>
-            </div>
-            <button
-              type="button"
-              className="find-similar-button"
-              onClick={(e) => { e.stopPropagation(); onFindSimilar(row) }}
-            >
-              Find similar
-            </button>
-          </label>
-        ))}
-      </div>
+              <button
+                type="button"
+                className="find-similar-button"
+                onClick={(e) => { e.stopPropagation(); onFindSimilar(row) }}
+              >
+                Find similar
+              </button>
+            </label>
+          ))}
+        </div>
       )}
     </div>
   )
