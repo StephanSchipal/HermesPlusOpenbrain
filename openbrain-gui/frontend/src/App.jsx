@@ -8,6 +8,7 @@ import ResultGrid from './ResultGrid.jsx'
 import DeleteLogView from './DeleteLogView.jsx'
 import ChangePopup from './ChangePopup.jsx'
 import SummaryPopup from './SummaryPopup.jsx'
+import KeywordGraph from './KeywordGraph.jsx'
 
 const SEARCH_PAGE_SIZE = 25
 
@@ -20,7 +21,7 @@ export default function App() {
   const [searchK, setSearchK] = useState(SEARCH_PAGE_SIZE)
   const [searching, setSearching] = useState(false)
   const [selectedId, setSelectedId] = useState(null)
-  const [showDeleteLog, setShowDeleteLog] = useState(false)
+  const [view, setView] = useState('results') // 'results' | 'deleteLog' | 'graph'
   const [editingRow, setEditingRow] = useState(null)
   const [viewingRow, setViewingRow] = useState(null)
   const [error, setError] = useState(null)
@@ -69,7 +70,7 @@ export default function App() {
   const handleSearch = async () => {
     if (!prompt.trim()) return
     setSelectedId(null)
-    setShowDeleteLog(false)
+    setView('results')
     await runSearch(SEARCH_PAGE_SIZE)
   }
 
@@ -142,7 +143,7 @@ export default function App() {
   }
 
   const selectedRow = rows.find((r) => r.id === selectedId)
-  const canLoadMore = !showDeleteLog && rows.length > 0 && rows.length >= searchK
+  const canLoadMore = view === 'results' && rows.length > 0 && rows.length >= searchK
 
   return (
     <div className="app">
@@ -189,13 +190,18 @@ export default function App() {
         <button disabled={!selectedRow} onClick={handleDelete}>
           Delete
         </button>
-        <button onClick={() => setShowDeleteLog((v) => !v)}>
-          {showDeleteLog ? 'Back to results' : 'Show delete log'}
+        <button onClick={() => setView((v) => (v === 'deleteLog' ? 'results' : 'deleteLog'))}>
+          {view === 'deleteLog' ? 'Back to results' : 'Show delete log'}
+        </button>
+        <button onClick={() => setView((v) => (v === 'graph' ? 'results' : 'graph'))}>
+          {view === 'graph' ? 'Back to results' : 'Show keyword graph'}
         </button>
       </div>
 
-      {showDeleteLog ? (
+      {view === 'deleteLog' ? (
         <DeleteLogView />
+      ) : view === 'graph' ? (
+        <KeywordGraph onKeywordClick={handleKeywordClick} />
       ) : searching ? (
         <p className="grid-empty">Searching…</p>
       ) : (
