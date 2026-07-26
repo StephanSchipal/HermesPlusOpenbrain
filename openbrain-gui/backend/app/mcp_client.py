@@ -11,11 +11,12 @@ verified by reading `mcp.server.fastmcp.utilities.func_metadata`'s
 `_try_create_model_and_schema` against the installed `mcp==1.27.0` -- a bare,
 un-parameterized `dict` return annotation does NOT produce `structuredContent`
 on a `CallToolResult`, only `list[...]`/`dict[str, X]`/`Union` annotations do.
-Concretely: `stats`, `delete`, and `update` (bare `dict`) must be parsed from
-the single unstructured text block (`parse_dict_result`); `search` and
-`list_keywords` (`list[dict]`) get real `structuredContent`, wrapped as
-`{"result": [...]}` (`parse_list_result`). If a future `mcp` upgrade changes
-this behavior, re-check that trace before collapsing the two helpers.
+Concretely: `stats`, `delete`, `update`, and `cluster_captures` (bare `dict`)
+must be parsed from the single unstructured text block (`parse_dict_result`);
+`search`, `list_keywords`, and `list_recent` (`list[dict]`) get real
+`structuredContent`, wrapped as `{"result": [...]}` (`parse_list_result`). If
+a future `mcp` upgrade changes this behavior, re-check that trace before
+collapsing the two helpers.
 """
 import json
 import httpx

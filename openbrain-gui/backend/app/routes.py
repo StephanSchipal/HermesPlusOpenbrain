@@ -1,8 +1,9 @@
 # app/routes.py
 """FastAPI routes for the OpenBrain GUI backend. Talks to openbrain-mcp
-for capture data (search/stats/keywords/delete/update) and to gui.db
-(SQLite, via prompts_store/delete_log_store) for GUI-local bookkeeping
-(saved prompts, delete log) -- design spec section 4, "Architecture"."""
+for capture data (search/stats/keywords/delete/update/graph) and to
+gui.db (SQLite, via prompts_store/delete_log_store) for GUI-local
+bookkeeping (saved prompts, delete log) -- design spec section 4,
+"Architecture"."""
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
