@@ -12,8 +12,8 @@ export default function ResultGrid({ rows, selectedId, onSelect, onFindSimilar, 
   const [sortBy, setSortBy] = useState(hasRelevance ? 'relevance' : 'date_desc')
 
   useEffect(() => {
-    setSortBy(rows.length > 0 && rows[0].score != null ? 'relevance' : 'date_desc')
-  }, [rows])
+    setSortBy(hasRelevance ? 'relevance' : 'date_desc')
+  }, [rows, hasRelevance])
 
   const sortedRows = useMemo(() => sortRows(rows, sortBy), [rows, sortBy])
 
