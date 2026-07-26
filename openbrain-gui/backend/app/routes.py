@@ -80,9 +80,10 @@ async def search(body: SearchRequest):
         "keywords": body.keywords, "keyword_mode": body.keyword_mode,
     })
     try:
-        rows = _rows_or_400(mcp_client.parse_list_result(result))
+        parsed = mcp_client.parse_list_result(result)
     except OpenBrainMCPError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
+    rows = _rows_or_400(parsed)
     for row in rows:
         row["subject_line"] = subject_line.make_subject_line(row["summary"])
     return rows
