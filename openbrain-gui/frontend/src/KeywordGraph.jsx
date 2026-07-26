@@ -14,6 +14,15 @@ export default function KeywordGraph({ onKeywordClick }) {
   const [hoveredKeyword, setHoveredKeyword] = useState(null)
   const svgRef = useRef(null)
   const graphApiRef = useRef(null)
+  // renderGraph() binds onNodeClick once, inside the [data]-keyed effect below,
+  // which does NOT re-run on every App.jsx render -- so a plain `onKeywordClick`
+  // reference would go stale the moment the parent's prompt state (and thus its
+  // non-memoized handler) changes, silently dropping subsequent bubble clicks.
+  // Route through a ref that's kept current every render instead.
+  const onKeywordClickRef = useRef(onKeywordClick)
+  useEffect(() => {
+    onKeywordClickRef.current = onKeywordClick
+  })
 
   const load = () => {
     setError(null)
@@ -24,7 +33,11 @@ export default function KeywordGraph({ onKeywordClick }) {
           result.clusters ? new Set(result.clusters.map((c) => c.cluster_id)) : null,
         )
       })
-      .catch((err) => setError(err.message))
+      .catch((err) => {
+        setError(err.message)
+        graphApiRef.current?.destroy()
+        graphApiRef.current = null
+      })
   }
 
   useEffect(load, [])
@@ -36,7 +49,7 @@ export default function KeywordGraph({ onKeywordClick }) {
       clusterCount: data.clusters.length,
       width: WIDTH,
       height: HEIGHT,
-      onNodeClick: onKeywordClick,
+      onNodeClick: (keyword) => onKeywordClickRef.current(keyword),
       onNodeHover: setHoveredKeyword,
     })
     return () => graphApiRef.current?.destroy()
