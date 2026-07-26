@@ -125,8 +125,8 @@ port 55432, user `openbrain`, password `testpass123`; otherwise create one from
 `migrations/001_init.sql`):
 
 ```bash
-DATABASE_URL="postgresql://openbrain:testpass123@localhost:55432/openbrain" \
-  python -m pytest openbrain-mcp/tests/test_store.py -v -k "filters_by_source or filters_by_date_range or keyword_filter or combines_multiple or rejects_invalid_keyword_mode"
+cd openbrain-mcp && DATABASE_URL="postgresql://openbrain:testpass123@localhost:55432/openbrain" \
+  python -m pytest tests/test_store.py -v -k "filters_by_source or filters_by_date_range or keyword_filter or combines_multiple or rejects_invalid_keyword_mode"
 ```
 
 Expected: FAIL with `TypeError: search_captures() got an unexpected keyword argument 'source'`.
@@ -204,8 +204,8 @@ where "Bis 2026-07-31" should include everything captured on July 31st, not just
 - [ ] **Step 4: Run tests to verify they pass** **[repo]**
 
 ```bash
-DATABASE_URL="postgresql://openbrain:testpass123@localhost:55432/openbrain" \
-  python -m pytest openbrain-mcp/tests/test_store.py -v -k "filters_by_source or filters_by_date_range or keyword_filter or combines_multiple or rejects_invalid_keyword_mode"
+cd openbrain-mcp && DATABASE_URL="postgresql://openbrain:testpass123@localhost:55432/openbrain" \
+  python -m pytest tests/test_store.py -v -k "filters_by_source or filters_by_date_range or keyword_filter or combines_multiple or rejects_invalid_keyword_mode"
 ```
 
 Expected: PASS (7 tests).
@@ -213,8 +213,8 @@ Expected: PASS (7 tests).
 - [ ] **Step 5: Run the full existing `test_store.py` suite to check for regressions** **[repo]**
 
 ```bash
-DATABASE_URL="postgresql://openbrain:testpass123@localhost:55432/openbrain" \
-  python -m pytest openbrain-mcp/tests/test_store.py -v
+cd openbrain-mcp && DATABASE_URL="postgresql://openbrain:testpass123@localhost:55432/openbrain" \
+  python -m pytest tests/test_store.py -v
 ```
 
 Expected: PASS, all tests (existing `test_save_then_semantic_search_finds_by_meaning` etc. still pass
@@ -287,8 +287,8 @@ def test_search_captures_rejects_neither_query_nor_capture_id():
 - [ ] **Step 2: Run tests to verify they fail** **[repo]**
 
 ```bash
-DATABASE_URL="postgresql://openbrain:testpass123@localhost:55432/openbrain" \
-  python -m pytest openbrain-mcp/tests/test_store.py -v -k "capture_id"
+cd openbrain-mcp && DATABASE_URL="postgresql://openbrain:testpass123@localhost:55432/openbrain" \
+  python -m pytest tests/test_store.py -v -k "capture_id"
 ```
 
 Expected: FAIL — `search_captures(conn)` with no `query` currently raises inside `embed_query(None)`
@@ -357,8 +357,8 @@ unchanged — only the validation/embedding-source section above it changes.)
 - [ ] **Step 4: Run tests to verify they pass** **[repo]**
 
 ```bash
-DATABASE_URL="postgresql://openbrain:testpass123@localhost:55432/openbrain" \
-  python -m pytest openbrain-mcp/tests/test_store.py -v -k "capture_id"
+cd openbrain-mcp && DATABASE_URL="postgresql://openbrain:testpass123@localhost:55432/openbrain" \
+  python -m pytest tests/test_store.py -v -k "capture_id"
 ```
 
 Expected: PASS (5 tests).
@@ -366,8 +366,8 @@ Expected: PASS (5 tests).
 - [ ] **Step 5: Run the full `test_store.py` suite** **[repo]**
 
 ```bash
-DATABASE_URL="postgresql://openbrain:testpass123@localhost:55432/openbrain" \
-  python -m pytest openbrain-mcp/tests/test_store.py -v
+cd openbrain-mcp && DATABASE_URL="postgresql://openbrain:testpass123@localhost:55432/openbrain" \
+  python -m pytest tests/test_store.py -v
 ```
 
 Expected: PASS, all tests.
@@ -444,8 +444,8 @@ def test_fetch_recent_still_orders_by_created_at_desc_with_filters():
 - [ ] **Step 2: Run tests to verify they fail** **[repo]**
 
 ```bash
-DATABASE_URL="postgresql://openbrain:testpass123@localhost:55432/openbrain" \
-  python -m pytest openbrain-mcp/tests/test_store.py -v -k "fetch_recent_filters or fetch_recent_rejects or fetch_recent_still"
+cd openbrain-mcp && DATABASE_URL="postgresql://openbrain:testpass123@localhost:55432/openbrain" \
+  python -m pytest tests/test_store.py -v -k "fetch_recent_filters or fetch_recent_rejects or fetch_recent_still"
 ```
 
 Expected: FAIL with `TypeError: fetch_recent() got an unexpected keyword argument 'source'`.
@@ -489,8 +489,8 @@ def fetch_recent(conn: psycopg.Connection, *, n: int = 10, source: str | None = 
 - [ ] **Step 4: Run tests to verify they pass** **[repo]**
 
 ```bash
-DATABASE_URL="postgresql://openbrain:testpass123@localhost:55432/openbrain" \
-  python -m pytest openbrain-mcp/tests/test_store.py -v -k "fetch_recent"
+cd openbrain-mcp && DATABASE_URL="postgresql://openbrain:testpass123@localhost:55432/openbrain" \
+  python -m pytest tests/test_store.py -v -k "fetch_recent"
 ```
 
 Expected: PASS, all `fetch_recent` tests (old and new).
@@ -498,8 +498,8 @@ Expected: PASS, all `fetch_recent` tests (old and new).
 - [ ] **Step 5: Run the full `test_store.py` suite** **[repo]**
 
 ```bash
-DATABASE_URL="postgresql://openbrain:testpass123@localhost:55432/openbrain" \
-  python -m pytest openbrain-mcp/tests/test_store.py -v
+cd openbrain-mcp && DATABASE_URL="postgresql://openbrain:testpass123@localhost:55432/openbrain" \
+  python -m pytest tests/test_store.py -v
 ```
 
 Expected: PASS, all tests.
@@ -567,8 +567,8 @@ def list_recent(n: int = 10, source: str | None = None, date_from: str | None = 
 - [ ] **Step 2: Run the full existing test suite to confirm no regressions** **[repo]**
 
 ```bash
-DATABASE_URL="postgresql://openbrain:testpass123@localhost:55432/openbrain" \
-  python -m pytest openbrain-mcp/tests/ -v
+cd openbrain-mcp && DATABASE_URL="postgresql://openbrain:testpass123@localhost:55432/openbrain" \
+  python -m pytest tests/ -v
 ```
 
 Expected: PASS, all tests (including `test_server.py`'s auth/health tests, untouched by this change).
