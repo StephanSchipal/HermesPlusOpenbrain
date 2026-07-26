@@ -11,8 +11,9 @@ def build_keyword_graph(captures: list[dict], clusters: list[dict]) -> dict:
     clusters: cluster_captures()'s "clusters" list
         ([{"cluster_id", "size", "members": [{"id", "summary", "central"}]}]).
     Captures present in one input but not the other (a race between the two
-    MCP calls -- see mcp_client.py's module docstring for the general
-    pattern) are skipped rather than raising."""
+    separate MCP calls that produce these two inputs -- routes.py calls
+    list_recent() and cluster_captures() one after another, not atomically)
+    are skipped rather than raising."""
     member_info: dict[str, dict] = {}
     for cluster in clusters:
         for member in cluster["members"]:
