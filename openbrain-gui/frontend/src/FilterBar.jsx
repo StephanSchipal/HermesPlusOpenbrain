@@ -2,7 +2,13 @@ import { useEffect, useState } from 'react'
 import { api } from './api.js'
 
 function isoDate(d) {
-  return d.toISOString().slice(0, 10)
+  // Local calendar date, not UTC -- new Date(y, 0, 1) below builds local
+  // midnight, and toISOString()'s UTC conversion would shift that back a
+  // day in any timezone ahead of UTC.
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${day}`
 }
 
 export default function FilterBar({ sources, filters, onFiltersChange }) {
@@ -11,12 +17,13 @@ export default function FilterBar({ sources, filters, onFiltersChange }) {
 
   useEffect(() => {
     if (!keywordInput) { setSuggestions([]); return }
+    let ignore = false
     const timer = setTimeout(() => {
       api.getKeywords(keywordInput)
-        .then(setSuggestions)
-        .catch(() => setSuggestions([]))
+        .then((result) => { if (!ignore) setSuggestions(result) })
+        .catch(() => { if (!ignore) setSuggestions([]) })
     }, 200)
-    return () => clearTimeout(timer)
+    return () => { ignore = true; clearTimeout(timer) }
   }, [keywordInput])
 
   const update = (patch) => onFiltersChange({ ...filters, ...patch })
@@ -83,7 +90,7 @@ export default function FilterBar({ sources, filters, onFiltersChange }) {
           value={keywordInput}
           onChange={(e) => setKeywordInput(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key === 'Enter') { e.preventDefault(); addKeyword(keywordInput) }
+            if (e.key === 'Enter') { e.preventDefault(); addKeyword(keywordInput.trim()) }
           }}
         />
         {suggestions.length > 0 && (
