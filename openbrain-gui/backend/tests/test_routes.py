@@ -131,3 +131,48 @@ def test_delete_log_respects_limit(client, monkeypatch):
         client.post(f"/api/captures/{capture_id}/delete", json={"keywords": []})
     log = client.get("/api/delete-log", params={"limit": 2}).json()
     assert [entry["capture_id"] for entry in log] == ["c", "b"]
+
+def test_get_graph_builds_keyword_and_cluster_data(client, monkeypatch):
+    async def fake_call_tool(name, arguments):
+        if name == "list_recent":
+            assert arguments == {"n": 100_000}
+            return _list_result([
+                {"id": "a", "keywords": ["claude"]},
+                {"id": "b", "keywords": ["claude", "ai"]},
+            ])
+        if name == "cluster_captures":
+            assert arguments == {"k": None}
+            return _dict_result({"k": 1, "clusters": [
+                {"cluster_id": 0, "size": 2, "members": [
+                    {"id": "a", "summary": "Claude does things", "central": True},
+                    {"id": "b", "summary": "Claude and AI", "central": False},
+                ]},
+            ]})
+        raise AssertionError(f"unexpected tool call: {name}")
+    monkeypatch.setattr(mcp_client_module, "call_tool", fake_call_tool)
+    resp = client.get("/api/graph")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["clusters"][0]["label"] == "claude"
+    keywords_by_name = {k["keyword"]: k for k in body["keywords"]}
+    assert keywords_by_name["claude"]["count"] == 2
+    assert keywords_by_name["ai"]["count"] == 1
+
+def test_get_graph_returns_not_enough_captures(client, monkeypatch):
+    async def fake_call_tool(name, arguments):
+        if name == "list_recent":
+            return _list_result([{"id": "a", "keywords": []}, {"id": "b", "keywords": []}])
+        if name == "cluster_captures":
+            return _dict_result({"error": "need at least 4 captures to cluster, have 2"})
+        raise AssertionError(f"unexpected tool call: {name}")
+    monkeypatch.setattr(mcp_client_module, "call_tool", fake_call_tool)
+    resp = client.get("/api/graph")
+    assert resp.status_code == 200
+    assert resp.json() == {"error": "not_enough_captures", "count": 2}
+
+def test_get_graph_mcp_failure_returns_502(client, monkeypatch):
+    async def fake_call_tool(name, arguments):
+        raise ConnectionError("connection refused")
+    monkeypatch.setattr(mcp_client_module, "call_tool", fake_call_tool)
+    resp = client.get("/api/graph")
+    assert resp.status_code == 502

@@ -6,9 +6,9 @@ for capture data (search/stats/keywords/delete/update) and to gui.db
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from app import mcp_client, prompts_store, delete_log_store, subject_line
+from app import mcp_client, prompts_store, delete_log_store, subject_line, graph
 from app.mcp_client import OpenBrainMCPError
-from app.config import DEFAULT_SEARCH_K, DEFAULT_DELETE_LOG_LIMIT
+from app.config import DEFAULT_SEARCH_K, DEFAULT_DELETE_LOG_LIMIT, GRAPH_MAX_CAPTURES
 
 router = APIRouter(prefix="/api")
 
@@ -118,3 +118,22 @@ def delete_prompt(prompt_id: int):
 @router.get("/delete-log")
 def get_delete_log(limit: int = DEFAULT_DELETE_LOG_LIMIT):
     return delete_log_store.list_deletions(limit=limit)
+
+@router.get("/graph")
+async def get_graph():
+    captures_result = await _call("list_recent", {"n": GRAPH_MAX_CAPTURES})
+    try:
+        captures = mcp_client.parse_list_result(captures_result)
+    except OpenBrainMCPError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    cluster_result = await _call("cluster_captures", {"k": None})
+    try:
+        cluster_data = mcp_client.parse_dict_result(cluster_result)
+    except OpenBrainMCPError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    if "error" in cluster_data:
+        return {"error": "not_enough_captures", "count": len(captures)}
+
+    return graph.build_keyword_graph(captures, cluster_data["clusters"])
