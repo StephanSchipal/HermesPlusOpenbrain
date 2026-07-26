@@ -341,3 +341,85 @@ def test_list_keywords_returns_empty_list_for_empty_corpus():
     with get_conn() as conn:
         result = store.list_keywords(conn)
     assert result == []
+
+def test_search_captures_filters_by_source():
+    _clean()
+    with get_conn() as conn:
+        store.save_capture(conn, raw_text="a", summary="a note about the weather today",
+                           keywords=["weather"], source="whatsapp")
+        store.save_capture(conn, raw_text="b", summary="a note about the weather today",
+                           keywords=["weather"], source="web")
+    with get_conn() as conn:
+        results = store.search_captures(conn, query="weather", k=10, source="whatsapp")
+    assert len(results) == 1
+    assert results[0]["source"] == "whatsapp"
+
+def test_search_captures_filters_by_date_range():
+    _clean()
+    with get_conn() as conn:
+        r_old = store.save_capture(conn, raw_text="a", summary="an old note about hiking",
+                                   keywords=["hiking"], source="other")
+        r_new = store.save_capture(conn, raw_text="b", summary="a new note about hiking",
+                                   keywords=["hiking"], source="other")
+    with get_conn() as conn:  # backdate directly -- no API path changes created_at
+        with conn.cursor() as cur:
+            cur.execute("UPDATE captures SET created_at = '2020-01-01' WHERE id = %s", (r_old["id"],))
+        conn.commit()
+    with get_conn() as conn:
+        results = store.search_captures(conn, query="hiking", k=10, date_from="2025-01-01")
+    assert {r["id"] for r in results} == {r_new["id"]}
+
+def test_search_captures_keyword_filter_or_mode():
+    _clean()
+    with get_conn() as conn:
+        r_a = store.save_capture(conn, raw_text="a", summary="note one about topics",
+                                 keywords=["sarah"], source="other")
+        r_b = store.save_capture(conn, raw_text="b", summary="note two about topics",
+                                 keywords=["job"], source="other")
+        store.save_capture(conn, raw_text="c", summary="note three about topics",
+                           keywords=["unrelated"], source="other")
+    with get_conn() as conn:
+        results = store.search_captures(conn, query="topics", k=10,
+                                        keywords=["sarah", "job"], keyword_mode="or")
+    assert {r["id"] for r in results} == {r_a["id"], r_b["id"]}
+
+def test_search_captures_keyword_filter_and_mode():
+    _clean()
+    with get_conn() as conn:
+        r_both = store.save_capture(conn, raw_text="a", summary="note one about topics",
+                                    keywords=["sarah", "job"], source="other")
+        store.save_capture(conn, raw_text="b", summary="note two about topics",
+                           keywords=["sarah"], source="other")
+    with get_conn() as conn:
+        results = store.search_captures(conn, query="topics", k=10,
+                                        keywords=["sarah", "job"], keyword_mode="and")
+    assert {r["id"] for r in results} == {r_both["id"]}
+
+def test_search_captures_keyword_filter_is_case_insensitive():
+    _clean()
+    with get_conn() as conn:
+        r = store.save_capture(conn, raw_text="a", summary="a note about topics",
+                               keywords=["Sarah"], source="other")
+    with get_conn() as conn:
+        results = store.search_captures(conn, query="topics", k=10, keywords=["sarah"])
+    assert {r2["id"] for r2 in results} == {r["id"]}
+
+def test_search_captures_combines_multiple_filters():
+    _clean()
+    with get_conn() as conn:
+        r_match = store.save_capture(conn, raw_text="a", summary="a note about topics",
+                                     keywords=["sarah"], source="whatsapp")
+        store.save_capture(conn, raw_text="b", summary="a note about topics",
+                           keywords=["sarah"], source="web")            # wrong source
+        store.save_capture(conn, raw_text="c", summary="a note about topics",
+                           keywords=["unrelated"], source="whatsapp")   # wrong keyword
+    with get_conn() as conn:
+        results = store.search_captures(conn, query="topics", k=10,
+                                        source="whatsapp", keywords=["sarah"])
+    assert {r["id"] for r in results} == {r_match["id"]}
+
+def test_search_captures_rejects_invalid_keyword_mode():
+    _clean()
+    with get_conn() as conn:
+        result = store.search_captures(conn, query="anything", keyword_mode="xor")
+    assert result == {"error": "keyword_mode must be 'and' or 'or', got 'xor'"}

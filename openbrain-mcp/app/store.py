@@ -50,21 +50,65 @@ def save_capture(conn: psycopg.Connection, *, raw_text: str, summary: str,
     conn.commit()
     return {"id": str(new_id), "stored": True, "deduped": False}
 
-def search_captures(conn: psycopg.Connection, *, query: str, k: int = 5) -> list[dict]:
+def search_captures(conn: psycopg.Connection, *, query: str | None = None,
+                     capture_id: str | None = None, k: int = 5,
+                     source: str | None = None, date_from: str | None = None,
+                     date_to: str | None = None, keywords: list[str] | None = None,
+                     keyword_mode: str = "or") -> list[dict] | dict:
+    """Semantic search by query text, or (capture_id mode, added Task 2) by an
+    existing capture's already-stored embedding. Optional filters narrow the
+    SQL WHERE clause itself, not a post-fetch filter in the caller -- so a
+    narrow filter combined with a small k cannot silently under-return
+    matches that exist further down the ranked list. keyword_mode must be
+    "and" (every given keyword present) or "or" (any given keyword present);
+    keyword matching is case-insensitive since `keywords` is stored
+    case-preserving (see `normalize_keywords`)."""
+    if keyword_mode not in ("and", "or"):
+        return {"error": f"keyword_mode must be 'and' or 'or', got {keyword_mode!r}"}
+
     emb = embed_query(query)
+    where_clauses, where_params = _build_filter_clause(
+        source=source, date_from=date_from, date_to=date_to,
+        keywords=keywords, keyword_mode=keyword_mode,
+    )
+    where_sql = f"WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
     with conn.cursor() as cur:
         cur.execute(
-            """
+            f"""
             SELECT id, summary, keywords, source, source_url, lang, created_at,
                    1 - (embedding <=> %s::vector) AS score
             FROM captures
+            {where_sql}
             ORDER BY embedding <=> %s::vector
             LIMIT %s
             """,
-            (emb, emb, k),
+            [emb, *where_params, emb, k],
         )
         rows = cur.fetchall()
     return [_row_to_result(r) for r in rows]
+
+def _build_filter_clause(*, source: str | None, date_from: str | None, date_to: str | None,
+                         keywords: list[str] | None, keyword_mode: str) -> tuple[list[str], list]:
+    """Shared by search_captures and fetch_recent: builds the WHERE-clause
+    fragments and their parameters for the source/date/keyword filters. Does
+    NOT validate keyword_mode -- callers already did that before this runs."""
+    clauses: list[str] = []
+    params: list = []
+    if source is not None:
+        clauses.append("source = %s")
+        params.append(source)
+    if date_from is not None:
+        clauses.append("created_at::date >= %s::date")
+        params.append(date_from)
+    if date_to is not None:
+        clauses.append("created_at::date <= %s::date")
+        params.append(date_to)
+    if keywords:
+        lowered = [kw.lower() for kw in keywords]
+        op = "@>" if keyword_mode == "and" else "&&"
+        clauses.append(f"ARRAY(SELECT lower(kw) FROM unnest(keywords) AS kw) {op} %s::text[]")
+        params.append(lowered)
+    return clauses, params
 
 def find_near_duplicates(conn: psycopg.Connection, *, threshold: float = 0.95,
                          limit: int = 50) -> list[dict]:
