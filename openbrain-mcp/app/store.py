@@ -111,9 +111,9 @@ def _validate_keyword_mode(keyword_mode: str) -> dict | None:
 
 def _build_filter_clause(*, source: str | None, date_from: str | None, date_to: str | None,
                          keywords: list[str] | None, keyword_mode: str) -> tuple[list[str], list]:
-    """Will be shared by search_captures and (from Task 3) fetch_recent:
-    builds the WHERE-clause fragments and their parameters for the
-    source/date/keyword filters. Does NOT validate keyword_mode -- callers
+    """Shared by search_captures and fetch_recent: builds the WHERE-clause
+    fragments and their parameters for the source/date/keyword filters.
+    Does NOT validate keyword_mode -- callers
     already did that before this runs."""
     clauses: list[str] = []
     params: list = []
