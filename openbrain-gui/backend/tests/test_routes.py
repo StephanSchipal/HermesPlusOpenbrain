@@ -47,7 +47,12 @@ def test_get_keywords_filters_case_insensitively(client, monkeypatch):
 
 def test_search_adds_subject_line_per_row(client, monkeypatch):
     async def fake_call_tool(name, arguments):
-        assert name == "search" and arguments == {"query": "career notes", "k": 25}
+        assert name == "search"
+        assert arguments == {
+            "query": "career notes", "capture_id": None, "k": 25,
+            "source": None, "date_from": None, "date_to": None,
+            "keywords": None, "keyword_mode": "or",
+        }
         return _list_result(
             [{"id": "abc", "summary": "Sarah is considering a pivot", "keywords": ["career"]}]
         )
@@ -58,6 +63,47 @@ def test_search_adds_subject_line_per_row(client, monkeypatch):
         "id": "abc", "summary": "Sarah is considering a pivot",
         "keywords": ["career"], "subject_line": "Sarah is considering a pivot",
     }]
+
+def test_search_passes_filters_to_mcp_tool(client, monkeypatch):
+    async def fake_call_tool(name, arguments):
+        assert arguments == {
+            "query": "career notes", "capture_id": None, "k": 25,
+            "source": "whatsapp", "date_from": "2026-01-01", "date_to": "2026-12-31",
+            "keywords": ["sarah"], "keyword_mode": "and",
+        }
+        return _list_result([])
+    monkeypatch.setattr(mcp_client_module, "call_tool", fake_call_tool)
+    resp = client.post("/api/search", json={
+        "query": "career notes", "source": "whatsapp",
+        "date_from": "2026-01-01", "date_to": "2026-12-31",
+        "keywords": ["sarah"], "keyword_mode": "and",
+    })
+    assert resp.status_code == 200
+    assert resp.json() == []
+
+def test_search_by_capture_id(client, monkeypatch):
+    async def fake_call_tool(name, arguments):
+        assert arguments["capture_id"] == "abc" and arguments["query"] is None
+        return _list_result([{"id": "def", "summary": "a neighbor", "keywords": []}])
+    monkeypatch.setattr(mcp_client_module, "call_tool", fake_call_tool)
+    resp = client.post("/api/search", json={"capture_id": "abc"})
+    assert resp.status_code == 200
+    assert resp.json()[0]["id"] == "def"
+
+def test_search_error_dict_from_mcp_becomes_400(client, monkeypatch):
+    async def fake_call_tool(name, arguments):
+        # search's return annotation is a Union -- its error dict still
+        # arrives via structuredContent, so _list_result (not _dict_result)
+        # is the correct mock here (see the note above about Union handling).
+        return _list_result({"error": "exactly one of query or capture_id must be given"})
+    monkeypatch.setattr(mcp_client_module, "call_tool", fake_call_tool)
+    resp = client.post("/api/search", json={})
+    assert resp.status_code == 400
+    assert "exactly one of" in resp.json()["detail"]
+
+def test_search_rejects_invalid_keyword_mode(client):
+    resp = client.post("/api/search", json={"query": "x", "keyword_mode": "xor"})
+    assert resp.status_code == 422
 
 def test_delete_capture_logs_before_calling_mcp(client, monkeypatch):
     calls = []

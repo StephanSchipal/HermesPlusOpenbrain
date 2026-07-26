@@ -4,6 +4,7 @@ for capture data (search/stats/keywords/delete/update/graph) and to
 gui.db (SQLite, via prompts_store/delete_log_store) for GUI-local
 bookkeeping (saved prompts, delete log) -- design spec section 4,
 "Architecture"."""
+from typing import Literal
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
@@ -14,8 +15,14 @@ from app.config import DEFAULT_SEARCH_K, DEFAULT_DELETE_LOG_LIMIT, GRAPH_MAX_CAP
 router = APIRouter(prefix="/api")
 
 class SearchRequest(BaseModel):
-    query: str
+    query: str | None = None
+    capture_id: str | None = None
     k: int = DEFAULT_SEARCH_K
+    source: str | None = None
+    date_from: str | None = None
+    date_to: str | None = None
+    keywords: list[str] | None = None
+    keyword_mode: Literal["and", "or"] = "or"
 
 class UpdateRequest(BaseModel):
     summary: str | None = None
@@ -56,11 +63,24 @@ async def get_keywords(filter: str = ""):
         keywords = [k for k in keywords if needle in k["keyword"].lower()]
     return keywords
 
+def _rows_or_400(parsed: list[dict] | dict) -> list[dict]:
+    """search/list_recent can return an {"error": ...} dict (bad capture_id,
+    invalid keyword_mode, both/neither of query+capture_id) instead of a row
+    list -- surface that as a 400 (caller's problem), distinct from the 502
+    reserved for openbrain-mcp being unreachable."""
+    if isinstance(parsed, dict):
+        raise HTTPException(status_code=400, detail=parsed.get("error", "invalid request"))
+    return parsed
+
 @router.post("/search")
 async def search(body: SearchRequest):
-    result = await _call("search", {"query": body.query, "k": body.k})
+    result = await _call("search", {
+        "query": body.query, "capture_id": body.capture_id, "k": body.k,
+        "source": body.source, "date_from": body.date_from, "date_to": body.date_to,
+        "keywords": body.keywords, "keyword_mode": body.keyword_mode,
+    })
     try:
-        rows = mcp_client.parse_list_result(result)
+        rows = _rows_or_400(mcp_client.parse_list_result(result))
     except OpenBrainMCPError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
     for row in rows:
