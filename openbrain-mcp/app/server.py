@@ -32,16 +32,38 @@ def save(raw_text: str, summary: str, keywords: list[str],
         )
 
 @mcp.tool()
-def search(query: str, k: int = 5) -> list[dict]:
-    """Semantic search over captured notes. Returns the top-k matches by meaning."""
+def search(query: str | None = None, capture_id: str | None = None, k: int = 5,
+           source: str | None = None, date_from: str | None = None,
+           date_to: str | None = None, keywords: list[str] | None = None,
+           keyword_mode: str = "or") -> list[dict] | dict:
+    """Semantic search over captured notes. Give exactly one of `query` (free
+    text) or `capture_id` (find notes similar to an existing capture, using
+    its already-stored embedding -- excludes that capture from its own
+    results); giving both or neither returns {"error": ...}. Optional
+    filters: `source` (exact match), `date_from`/`date_to` (ISO date
+    strings, inclusive, by calendar day), `keywords` (case-insensitive;
+    `keyword_mode` "and" requires all of them, "or" (default) requires any).
+    An invalid `keyword_mode` also returns {"error": ...} instead of raising."""
     with get_conn() as conn:
-        return store.search_captures(conn, query=query, k=k)
+        return store.search_captures(
+            conn, query=query, capture_id=capture_id, k=k, source=source,
+            date_from=date_from, date_to=date_to, keywords=keywords,
+            keyword_mode=keyword_mode,
+        )
 
 @mcp.tool()
-def list_recent(n: int = 10) -> list[dict]:
-    """List the most recently captured notes."""
+def list_recent(n: int = 10, source: str | None = None, date_from: str | None = None,
+                date_to: str | None = None, keywords: list[str] | None = None,
+                keyword_mode: str = "or") -> list[dict] | dict:
+    """List the most recently captured notes, optionally narrowed by the same
+    source/date/keyword filters as `search` (see its docstring) -- useful for
+    browsing by filter alone, with no search text. An invalid `keyword_mode`
+    returns {"error": ...} instead of raising."""
     with get_conn() as conn:
-        return store.fetch_recent(conn, n=n)
+        return store.fetch_recent(
+            conn, n=n, source=source, date_from=date_from, date_to=date_to,
+            keywords=keywords, keyword_mode=keyword_mode,
+        )
 
 @mcp.tool()
 def stats() -> dict:
