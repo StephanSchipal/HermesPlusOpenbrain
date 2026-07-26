@@ -26,6 +26,7 @@ export default function KeywordGraph({ onKeywordClick }) {
 
   const load = () => {
     setError(null)
+    setHoveredKeyword(null)
     api.getGraph()
       .then((result) => {
         setData(result)
