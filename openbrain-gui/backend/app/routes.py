@@ -90,6 +90,9 @@ async def search(body: SearchRequest):
 
 @router.get("/recent")
 async def get_recent(
+    # Filter-only browsing (source/date/keyword, no search text) via
+    # openbrain-mcp's list_recent -- /api/search requires exactly one of
+    # query/capture_id and errors when given neither, so it can't serve this.
     n: int = DEFAULT_SEARCH_K,
     source: str | None = None,
     date_from: str | None = None,
@@ -104,7 +107,7 @@ async def get_recent(
     try:
         parsed = mcp_client.parse_list_result(result)
     except OpenBrainMCPError as exc:
-        raise HTTPException(status_code=502, detail=f"openbrain-mcp unreachable: {exc}") from exc
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
     rows = _rows_or_400(parsed)
     for row in rows:
         row["subject_line"] = subject_line.make_subject_line(row["summary"])
