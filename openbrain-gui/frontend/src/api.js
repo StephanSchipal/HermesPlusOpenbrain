@@ -19,7 +19,7 @@ export const api = {
   search: (payload) => request('/search', { method: 'POST', body: JSON.stringify(payload) }),
   getRecent: (params) => {
     const query = new URLSearchParams()
-    if (params.n) query.set('n', params.n)
+    if (params.n != null) query.set('n', params.n)
     if (params.source) query.set('source', params.source)
     if (params.date_from) query.set('date_from', params.date_from)
     if (params.date_to) query.set('date_to', params.date_to)
