@@ -30,7 +30,13 @@ export default function App() {
   const [viewingRow, setViewingRow] = useState(null)
   const [error, setError] = useState(null)
   const [notice, setNotice] = useState(null)
+  const [hasSearched, setHasSearched] = useState(false)
   const promptTextareaRef = useRef(null)
+  // Bumped at the start of every search/browse/find-similar; a request only
+  // commits its results if it's still the most recent one when it resolves --
+  // guards against a slower, stale request (e.g. filters changed mid-flight)
+  // silently overwriting a newer one's results.
+  const searchTokenRef = useRef(0)
 
   useEffect(() => {
     // Resolve both mount-time fetches before touching `error` once -- doing
@@ -70,36 +76,41 @@ export default function App() {
   )
 
   const runSearch = async (k) => {
+    const token = ++searchTokenRef.current
     setSearching(true)
     try {
       const results = await api.search({ query: prompt, k, ...activeFilterPayload() })
+      if (token !== searchTokenRef.current) return  // a newer request already won
       setRows(results)
       setSearchK(k)
       setError(null)
     } catch (err) {
-      setError(err.message)
+      if (token === searchTokenRef.current) setError(err.message)
     } finally {
-      setSearching(false)
+      if (token === searchTokenRef.current) setSearching(false)
     }
   }
 
   const runBrowse = async (n) => {
+    const token = ++searchTokenRef.current
     setSearching(true)
     try {
       const results = await api.getRecent({ n, ...activeFilterPayload() })
+      if (token !== searchTokenRef.current) return
       setRows(results)
       setSearchK(n)
       setError(null)
     } catch (err) {
-      setError(err.message)
+      if (token === searchTokenRef.current) setError(err.message)
     } finally {
-      setSearching(false)
+      if (token === searchTokenRef.current) setSearching(false)
     }
   }
 
   const handleSearch = async () => {
     setSelectedId(null)
     setView('results')
+    setHasSearched(true)
     if (prompt.trim()) {
       await runSearch(SEARCH_PAGE_SIZE)
     } else {
@@ -113,18 +124,21 @@ export default function App() {
   const handleFindSimilar = async (row) => {
     setSelectedId(null)
     setView('results')
+    setHasSearched(true)
+    const token = ++searchTokenRef.current
     setSearching(true)
     try {
       const results = await api.search({
         capture_id: row.id, k: SEARCH_PAGE_SIZE, ...activeFilterPayload(),
       })
+      if (token !== searchTokenRef.current) return
       setRows(results)
       setSearchK(SEARCH_PAGE_SIZE)
       setError(null)
     } catch (err) {
-      setError(err.message)
+      if (token === searchTokenRef.current) setError(err.message)
     } finally {
-      setSearching(false)
+      if (token === searchTokenRef.current) setSearching(false)
     }
   }
 
@@ -197,7 +211,7 @@ export default function App() {
   const selectedRow = rows.find((r) => r.id === selectedId)
   const canActOnSelection = view === 'results' && !!selectedRow
   const canLoadMore = view === 'results' && rows.length > 0 && rows.length >= searchK
-  const hitCountLabel = view === 'results' && rows.length > 0
+  const hitCountLabel = view === 'results' && hasSearched
     ? `${rows.length} result${rows.length === 1 ? '' : 's'}`
       + (hasActiveFilters && stats ? ` (filtered from ${stats.total})` : '')
     : null
@@ -274,6 +288,7 @@ export default function App() {
           onSelect={setSelectedId}
           onFindSimilar={handleFindSimilar}
           hitCountLabel={hitCountLabel}
+          hasSearched={hasSearched}
         />
       )}
 

@@ -7,7 +7,7 @@ function sortRows(rows, sortBy) {
   return rows // 'relevance' -- already ordered by the backend
 }
 
-export default function ResultGrid({ rows, selectedId, onSelect, onFindSimilar, hitCountLabel }) {
+export default function ResultGrid({ rows, selectedId, onSelect, onFindSimilar, hitCountLabel, hasSearched }) {
   const hasRelevance = rows.length > 0 && rows[0].score != null
   const [sortBy, setSortBy] = useState(hasRelevance ? 'relevance' : 'date_desc')
 
@@ -17,7 +17,7 @@ export default function ResultGrid({ rows, selectedId, onSelect, onFindSimilar, 
 
   const sortedRows = useMemo(() => sortRows(rows, sortBy), [rows, sortBy])
 
-  if (rows.length === 0) {
+  if (rows.length === 0 && !hasSearched) {
     return <p className="grid-empty">No results yet — run a search.</p>
   }
 
@@ -25,16 +25,21 @@ export default function ResultGrid({ rows, selectedId, onSelect, onFindSimilar, 
     <div className="result-grid-wrapper">
       <div className="result-grid-header">
         {hitCountLabel && <span className="label">{hitCountLabel}</span>}
-        <select
-          className="sort-dropdown"
-          value={sortBy}
-          onChange={(e) => setSortBy(e.target.value)}
-        >
-          {hasRelevance && <option value="relevance">Relevance</option>}
-          <option value="date_desc">Date, newest first</option>
-          <option value="date_asc">Date, oldest first</option>
-        </select>
+        {rows.length > 0 && (
+          <select
+            className="sort-dropdown"
+            value={sortBy}
+            onChange={(e) => setSortBy(e.target.value)}
+          >
+            {hasRelevance && <option value="relevance">Relevance</option>}
+            <option value="date_desc">Date, newest first</option>
+            <option value="date_asc">Date, oldest first</option>
+          </select>
+        )}
       </div>
+      {rows.length === 0 ? (
+        <p className="grid-empty">No results match your search.</p>
+      ) : (
       <div className="result-grid">
         {sortedRows.map((row) => (
           <label key={row.id} className="result-row">
@@ -69,6 +74,7 @@ export default function ResultGrid({ rows, selectedId, onSelect, onFindSimilar, 
           </label>
         ))}
       </div>
+      )}
     </div>
   )
 }
