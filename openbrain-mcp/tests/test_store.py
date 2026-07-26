@@ -465,3 +465,51 @@ def test_search_captures_rejects_both_query_and_capture_id():
     with get_conn() as conn:
         result = store.search_captures(conn, query="anything", capture_id=r["id"])
     assert result == {"error": "exactly one of query or capture_id must be given"}
+
+def test_fetch_recent_filters_by_source():
+    _clean()
+    with get_conn() as conn:
+        store.save_capture(conn, raw_text="a", summary="note a", keywords=["x"], source="whatsapp")
+        store.save_capture(conn, raw_text="b", summary="note b", keywords=["x"], source="web")
+    with get_conn() as conn:
+        results = store.fetch_recent(conn, n=10, source="whatsapp")
+    assert len(results) == 1
+    assert results[0]["source"] == "whatsapp"
+
+def test_fetch_recent_filters_by_date_range():
+    _clean()
+    with get_conn() as conn:
+        r_old = store.save_capture(conn, raw_text="a", summary="old note", keywords=["x"], source="other")
+        r_new = store.save_capture(conn, raw_text="b", summary="new note", keywords=["x"], source="other")
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("UPDATE captures SET created_at = '2020-01-01' WHERE id = %s", (r_old["id"],))
+        conn.commit()
+    with get_conn() as conn:
+        results = store.fetch_recent(conn, n=10, date_from="2025-01-01")
+    assert {r["id"] for r in results} == {r_new["id"]}
+
+def test_fetch_recent_filters_by_keywords_and_mode():
+    _clean()
+    with get_conn() as conn:
+        r_both = store.save_capture(conn, raw_text="a", summary="note",
+                                    keywords=["sarah", "job"], source="other")
+        store.save_capture(conn, raw_text="b", summary="note", keywords=["sarah"], source="other")
+    with get_conn() as conn:
+        results = store.fetch_recent(conn, n=10, keywords=["sarah", "job"], keyword_mode="and")
+    assert {r["id"] for r in results} == {r_both["id"]}
+
+def test_fetch_recent_rejects_invalid_keyword_mode():
+    _clean()
+    with get_conn() as conn:
+        result = store.fetch_recent(conn, keyword_mode="xor")
+    assert result == {"error": "keyword_mode must be 'and' or 'or', got 'xor'"}
+
+def test_fetch_recent_still_orders_by_created_at_desc_with_filters():
+    _clean()
+    with get_conn() as conn:
+        r1 = store.save_capture(conn, raw_text="a", summary="note one", keywords=["x"], source="other")
+        r2 = store.save_capture(conn, raw_text="b", summary="note two", keywords=["x"], source="other")
+    with get_conn() as conn:
+        results = store.fetch_recent(conn, n=10, source="other")
+    assert [r["id"] for r in results] == [r2["id"], r1["id"]]  # newest first

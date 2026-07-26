@@ -265,16 +265,32 @@ def list_keywords(conn: psycopg.Connection) -> list[dict]:
         rows = cur.fetchall()
     return [{"keyword": r[0], "count": r[1]} for r in rows]
 
-def fetch_recent(conn: psycopg.Connection, *, n: int = 10) -> list[dict]:
+def fetch_recent(conn: psycopg.Connection, *, n: int = 10, source: str | None = None,
+                 date_from: str | None = None, date_to: str | None = None,
+                 keywords: list[str] | None = None, keyword_mode: str = "or"
+                 ) -> list[dict] | dict:
+    """Most recent captures, optionally narrowed by the same source/date/
+    keyword filters as search_captures -- no query/ranking involved, stays
+    ordered by created_at DESC. Used for filter-only browsing when there's
+    no search text at all."""
+    if (error := _validate_keyword_mode(keyword_mode)) is not None:
+        return error
+
+    where_clauses, where_params = _build_filter_clause(
+        source=source, date_from=date_from, date_to=date_to,
+        keywords=keywords, keyword_mode=keyword_mode,
+    )
+    where_sql = f"WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
     with conn.cursor() as cur:
         cur.execute(
-            """
+            f"""
             SELECT id, summary, keywords, source, source_url, lang, created_at, NULL::float
             FROM captures
+            {where_sql}
             ORDER BY created_at DESC
             LIMIT %s
             """,
-            (n,),
+            [*where_params, n],
         )
         rows = cur.fetchall()
     return [_row_to_result(r) for r in rows]
