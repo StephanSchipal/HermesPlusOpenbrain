@@ -313,16 +313,19 @@ See the design spec §6 and the plan's "Known follow-ups" section for lower-prio
 ideas already identified but deliberately deferred (e.g. a read-only token for laptop clients vs.
 a write token for Hermes, constant-time token comparison).
 
-## OpenBrain Web GUI (Phase 1)
+## OpenBrain Web GUI
 
 A single-user React + FastAPI web GUI for browsing, searching, editing, and deleting captures — a
-friendlier alternative to querying via Claude Desktop/Code or WhatsApp. Phase 1 of a three-phase
-plan (Phase 2: dynamic word cloud + AND/OR keyword search; Phase 3: surfacing clustering/
-classification in the GUI — both future work, not yet started).
+friendlier alternative to querying via Claude Desktop/Code or WhatsApp. Phase 1 (search/browse/
+change/delete, saved prompts, delete log) and Phase 3 (a keyword graph — see below) are both live.
+**Phase 2 (dynamic word cloud + AND/OR keyword search) was explicitly skipped** in favor of Phase
+3's graph.
 
 Full details:
-- Design spec — [`docs/superpowers/specs/2026-07-24-openbrain-gui-phase1-design.md`](docs/superpowers/specs/2026-07-24-openbrain-gui-phase1-design.md)
-- Implementation plan — [`docs/superpowers/plans/2026-07-24-openbrain-gui-phase1.md`](docs/superpowers/plans/2026-07-24-openbrain-gui-phase1.md)
+- Phase 1 design spec — [`docs/superpowers/specs/2026-07-24-openbrain-gui-phase1-design.md`](docs/superpowers/specs/2026-07-24-openbrain-gui-phase1-design.md)
+- Phase 1 implementation plan — [`docs/superpowers/plans/2026-07-24-openbrain-gui-phase1.md`](docs/superpowers/plans/2026-07-24-openbrain-gui-phase1.md)
+- Phase 3 design spec — [`docs/superpowers/specs/2026-07-25-openbrain-gui-phase3-keyword-graph-design.md`](docs/superpowers/specs/2026-07-25-openbrain-gui-phase3-keyword-graph-design.md)
+- Phase 3 implementation plan — [`docs/superpowers/plans/2026-07-25-openbrain-gui-phase3-keyword-graph.md`](docs/superpowers/plans/2026-07-25-openbrain-gui-phase3-keyword-graph.md)
 
 **Architecture:** one new container (`openbrain-gui`), combining a Vite-built React SPA (served as
 static files) with a FastAPI backend, built via a multi-stage Dockerfile. The backend is the only
@@ -351,6 +354,14 @@ Access is single-user, gated by Traefik basic-auth — no login screen, no per-u
 `deploy/.env`'s `GUI_BASIC_AUTH_USERS`). Its security model relies solely on Traefik's edge
 basic-auth (no app-level token of its own, unlike `openbrain-mcp`) — a deliberately accepted,
 revisitable tradeoff for this personal, single-VPS deployment.
+
+**Keyword graph (Phase 3):** a "Show keyword graph" toggle (next to "Show delete log") renders
+every keyword as a bubble, sized by frequency and colored by an automatically-detected thematic
+cluster — powered entirely by the existing `cluster_captures` MCP tool, no new `openbrain-mcp`
+capability needed. Hovering a bubble or a cluster in the legend shows the captures behind it
+(central/most-representative ones starred); clicking a bubble inserts that keyword into the search
+prompt, same as the existing keyword-filter list. Pan/zoom via scroll, drag, or the on-screen
++/− buttons.
 
 ### Running it locally
 

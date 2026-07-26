@@ -442,10 +442,26 @@ Vier Fähigkeiten, die als neue MCP-Tools nach dem bestehenden Muster
    pro Ergebnis sichtbar (statt eines blind geratenen Cutoffs — Kalibrierung
    zeigte, dass ein fester Schwellwert bei diesem thematisch engen Corpus
    keine sauberen Treffer/Nicht-Treffer trennt), Quell-URLs als klickbare
-   Links. Phase 2 (Wordcloud, AND/OR-Keyword-Suche) und Phase 3
-   (Clustering/Klassifikation in der GUI) sind bewusst nicht Teil dieser
-   Phase — siehe `planGUI.md`.
+   Links. Phase 2 (Wordcloud, AND/OR-Keyword-Suche) wurde übersprungen —
+   siehe Punkt 6.
 
-Damit sind alle 4 ursprünglich geplanten MCP-Fähigkeiten sowie Phase 1 der
-Web-GUI umgesetzt und deployed. Details zu jeder einzelnen siehe die
-jeweiligen Spec-/Plan-Dokumente unter `docs/superpowers/`.
+6. ✅ **Web-GUI Phase 3 — Keyword-Graph** (`openbrain-gui`) — eine neue
+   "Show keyword graph"-Ansicht (neben "Show delete log") zeigt jedes
+   Keyword als Bubble, Größe = Häufigkeit, Farbe = automatisch erkanntes
+   Themen-Cluster — komplett über das bestehende `cluster_captures`-Tool,
+   keine neue `openbrain-mcp`-Fähigkeit nötig. Hover auf einer Bubble oder
+   einer Cluster-Zeile in der Legende zeigt die zugehörigen Einträge
+   (zentrale/repräsentativste mit ★ markiert); Klick auf eine Bubble fügt
+   das Keyword ins Suchfeld ein, wie bei der bestehenden Keyword-Liste.
+   Zoom/Pan per Scrollrad, Ziehen oder +/−-Buttons (`d3-force` fürs
+   Cluster-Layout, `d3-zoom` fürs Zoomen — zwei kleine, gezielte
+   Zusatzpakete). Phase 2 (Wordcloud, AND/OR-Keyword-Suche) wurde bewusst
+   übersprungen. Spec:
+   [`docs/superpowers/specs/2026-07-25-openbrain-gui-phase3-keyword-graph-design.md`](docs/superpowers/specs/2026-07-25-openbrain-gui-phase3-keyword-graph-design.md),
+   Plan:
+   [`docs/superpowers/plans/2026-07-25-openbrain-gui-phase3-keyword-graph.md`](docs/superpowers/plans/2026-07-25-openbrain-gui-phase3-keyword-graph.md).
+
+Damit sind alle 4 ursprünglich geplanten MCP-Fähigkeiten sowie Phase 1 und
+Phase 3 der Web-GUI umgesetzt und deployed (Phase 2 bewusst übersprungen).
+Details zu jeder einzelnen siehe die jeweiligen Spec-/Plan-Dokumente unter
+`docs/superpowers/`.
