@@ -9,6 +9,7 @@ import DeleteLogView from './DeleteLogView.jsx'
 import ChangePopup from './ChangePopup.jsx'
 import SummaryPopup from './SummaryPopup.jsx'
 import KeywordGraph from './KeywordGraph.jsx'
+import FilterBar from './FilterBar.jsx'
 
 const SEARCH_PAGE_SIZE = 25
 
@@ -19,6 +20,9 @@ export default function App() {
   const [selectedPromptId, setSelectedPromptId] = useState('')
   const [rows, setRows] = useState([])
   const [searchK, setSearchK] = useState(SEARCH_PAGE_SIZE)
+  const [filters, setFilters] = useState({
+    source: '', date_from: '', date_to: '', keywords: [], keyword_mode: 'or',
+  })
   const [searching, setSearching] = useState(false)
   const [selectedId, setSelectedId] = useState(null)
   const [view, setView] = useState('results') // 'results' | 'deleteLog' | 'graph'
@@ -53,10 +57,22 @@ export default function App() {
     setPrompt(prompt.slice(0, start) + keyword + prompt.slice(end))
   }
 
+  const activeFilterPayload = () => ({
+    source: filters.source || undefined,
+    date_from: filters.date_from || undefined,
+    date_to: filters.date_to || undefined,
+    keywords: filters.keywords.length ? filters.keywords : undefined,
+    keyword_mode: filters.keyword_mode,
+  })
+
+  const hasActiveFilters = Boolean(
+    filters.source || filters.date_from || filters.date_to || filters.keywords.length
+  )
+
   const runSearch = async (k) => {
     setSearching(true)
     try {
-      const results = await api.search(prompt, k)
+      const results = await api.search({ query: prompt, k, ...activeFilterPayload() })
       setRows(results)
       setSearchK(k)
       setError(null)
@@ -67,14 +83,50 @@ export default function App() {
     }
   }
 
-  const handleSearch = async () => {
-    if (!prompt.trim()) return
-    setSelectedId(null)
-    setView('results')
-    await runSearch(SEARCH_PAGE_SIZE)
+  const runBrowse = async (n) => {
+    setSearching(true)
+    try {
+      const results = await api.getRecent({ n, ...activeFilterPayload() })
+      setRows(results)
+      setSearchK(n)
+      setError(null)
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setSearching(false)
+    }
   }
 
-  const handleLoadMore = () => runSearch(searchK + SEARCH_PAGE_SIZE)
+  const handleSearch = async () => {
+    setSelectedId(null)
+    setView('results')
+    if (prompt.trim()) {
+      await runSearch(SEARCH_PAGE_SIZE)
+    } else {
+      await runBrowse(SEARCH_PAGE_SIZE)
+    }
+  }
+
+  const handleLoadMore = () =>
+    prompt.trim() ? runSearch(searchK + SEARCH_PAGE_SIZE) : runBrowse(searchK + SEARCH_PAGE_SIZE)
+
+  const handleFindSimilar = async (row) => {
+    setSelectedId(null)
+    setView('results')
+    setSearching(true)
+    try {
+      const results = await api.search({
+        capture_id: row.id, k: SEARCH_PAGE_SIZE, ...activeFilterPayload(),
+      })
+      setRows(results)
+      setSearchK(SEARCH_PAGE_SIZE)
+      setError(null)
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setSearching(false)
+    }
+  }
 
   const handleSavePrompt = async () => {
     if (!prompt.trim()) return
@@ -145,6 +197,10 @@ export default function App() {
   const selectedRow = rows.find((r) => r.id === selectedId)
   const canActOnSelection = view === 'results' && !!selectedRow
   const canLoadMore = view === 'results' && rows.length > 0 && rows.length >= searchK
+  const hitCountLabel = view === 'results' && rows.length > 0
+    ? `${rows.length} result${rows.length === 1 ? '' : 's'}`
+      + (hasActiveFilters && stats ? ` (filtered from ${stats.total})` : '')
+    : null
 
   return (
     <div className="app">
@@ -181,6 +237,12 @@ export default function App() {
         <KeywordPanel onKeywordClick={handleKeywordClick} />
       </div>
 
+      <FilterBar
+        sources={stats ? Object.keys(stats.by_source) : []}
+        filters={filters}
+        onFiltersChange={setFilters}
+      />
+
       <div className="grid-actions">
         <button disabled={!canActOnSelection} onClick={() => setViewingRow(selectedRow)}>
           Summary
@@ -206,7 +268,13 @@ export default function App() {
       ) : searching ? (
         <p className="grid-empty">Searching…</p>
       ) : (
-        <ResultGrid rows={rows} selectedId={selectedId} onSelect={setSelectedId} />
+        <ResultGrid
+          rows={rows}
+          selectedId={selectedId}
+          onSelect={setSelectedId}
+          onFindSimilar={handleFindSimilar}
+          hitCountLabel={hitCountLabel}
+        />
       )}
 
       {canLoadMore && (
