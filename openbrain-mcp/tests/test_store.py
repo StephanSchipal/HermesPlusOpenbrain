@@ -429,3 +429,39 @@ def test_search_captures_rejects_neither_query_nor_capture_id():
     with get_conn() as conn:
         result = store.search_captures(conn)
     assert result == {"error": "exactly one of query or capture_id must be given"}
+
+def test_search_captures_by_capture_id_excludes_itself_and_finds_neighbors():
+    _clean()
+    id_to_topic = _save_topic_fixture()  # 15 captures, 3 topics x 5 near-duplicate-worded each
+    career_ids = [cid for cid, topic in id_to_topic.items() if topic == "career"]
+    with get_conn() as conn:
+        results = store.search_captures(conn, capture_id=career_ids[0], k=4)
+    result_ids = {r["id"] for r in results}
+    assert career_ids[0] not in result_ids
+    assert result_ids == set(career_ids[1:])  # its 4 nearest neighbors: the other career captures
+
+def test_search_captures_capture_id_respects_filters():
+    _clean()
+    id_to_topic = _save_topic_fixture()
+    career_ids = [cid for cid, topic in id_to_topic.items() if topic == "career"]
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("UPDATE captures SET source = 'whatsapp' WHERE id = %s", (career_ids[1],))
+        conn.commit()
+    with get_conn() as conn:
+        results = store.search_captures(conn, capture_id=career_ids[0], k=10, source="whatsapp")
+    assert {r["id"] for r in results} == {career_ids[1]}
+
+def test_search_captures_unknown_capture_id_returns_error():
+    _clean()
+    with get_conn() as conn:
+        result = store.search_captures(conn, capture_id="00000000-0000-0000-0000-000000000000")
+    assert result == {"error": "capture not found: 00000000-0000-0000-0000-000000000000"}
+
+def test_search_captures_rejects_both_query_and_capture_id():
+    _clean()
+    with get_conn() as conn:
+        r = store.save_capture(conn, raw_text="a", summary="a note", keywords=["x"], source="other")
+    with get_conn() as conn:
+        result = store.search_captures(conn, query="anything", capture_id=r["id"])
+    assert result == {"error": "exactly one of query or capture_id must be given"}

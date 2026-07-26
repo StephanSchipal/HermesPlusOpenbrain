@@ -55,24 +55,35 @@ def search_captures(conn: psycopg.Connection, *, query: str | None = None,
                      source: str | None = None, date_from: str | None = None,
                      date_to: str | None = None, keywords: list[str] | None = None,
                      keyword_mode: str = "or") -> list[dict] | dict:
-    """Semantic search by query text, or (capture_id mode, added Task 2) by an
-    existing capture's already-stored embedding. Optional filters narrow the
-    SQL WHERE clause itself, not a post-fetch filter in the caller -- so a
-    narrow filter combined with a small k cannot silently under-return
-    matches that exist further down the ranked list. keyword_mode must be
-    "and" (every given keyword present) or "or" (any given keyword present);
-    keyword matching is case-insensitive since `keywords` is stored
-    case-preserving (see `normalize_keywords`)."""
+    """Semantic search by query text, or by an existing capture's already-stored
+    embedding (capture_id) -- excludes that capture from its own results.
+    Optional filters narrow the SQL WHERE clause itself, not a post-fetch
+    filter in the caller -- so a narrow filter combined with a small k cannot
+    silently under-return matches that exist further down the ranked list.
+    keyword_mode must be "and" (every given keyword present) or "or" (any
+    given keyword present); keyword matching is case-insensitive since
+    `keywords` is stored case-preserving (see `normalize_keywords`)."""
     if (error := _validate_keyword_mode(keyword_mode)) is not None:
         return error
     if (query is None) == (capture_id is None):
         return {"error": "exactly one of query or capture_id must be given"}
 
-    emb = embed_query(query)
     where_clauses, where_params = _build_filter_clause(
         source=source, date_from=date_from, date_to=date_to,
         keywords=keywords, keyword_mode=keyword_mode,
     )
+    if capture_id is not None:
+        with conn.cursor() as cur:
+            cur.execute("SELECT embedding FROM captures WHERE id = %s", (capture_id,))
+            row = cur.fetchone()
+        if row is None:
+            return {"error": f"capture not found: {capture_id}"}
+        emb = row[0]
+        where_clauses.append("id != %s")
+        where_params.append(capture_id)
+    else:
+        emb = embed_query(query)
+
     where_sql = f"WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
     with conn.cursor() as cur:
         # where_sql is built from static column-name/operator literals chosen
