@@ -348,20 +348,20 @@ Access is single-user, gated by Traefik basic-auth — no login screen, no per-u
   └─────────────────────────────┘
 ```
 
-**Status:** built, TDD'd (22 backend tests, plus the 3 new `list_keywords` tests folded into
+**Status:** built, TDD'd (35 backend tests, plus the 3 `list_keywords` tests folded into
 `openbrain-mcp`'s 36 above), and **live since 2026-07-25** at
 `https://gui.<vps-host>.hstgr.cloud`, behind Traefik basic-auth (single credential pair in
 `deploy/.env`'s `GUI_BASIC_AUTH_USERS`). Its security model relies solely on Traefik's edge
 basic-auth (no app-level token of its own, unlike `openbrain-mcp`) — a deliberately accepted,
 revisitable tradeoff for this personal, single-VPS deployment.
 
-**Keyword graph (Phase 3):** a "Show keyword graph" toggle (next to "Show delete log") renders
-every keyword as a bubble, sized by frequency and colored by an automatically-detected thematic
-cluster — powered entirely by the existing `cluster_captures` MCP tool, no new `openbrain-mcp`
-capability needed. Hovering a bubble or a cluster in the legend shows the captures behind it
-(central/most-representative ones starred); clicking a bubble inserts that keyword into the search
-prompt, same as the existing keyword-filter list. Pan/zoom via scroll, drag, or the on-screen
-+/− buttons.
+**Keyword graph (Phase 3):** live since 2026-07-26. A "Show keyword graph" toggle (next to "Show
+delete log") renders every keyword as a bubble, sized by frequency and colored by an
+automatically-detected thematic cluster — powered entirely by the existing `cluster_captures` MCP
+tool, no new `openbrain-mcp` capability needed. Hovering a bubble or a cluster in the legend shows
+the captures behind it (central/most-representative ones starred); clicking a bubble inserts that
+keyword into the search prompt, same as the existing keyword-filter list. Pan/zoom via scroll,
+drag, or the on-screen +/− buttons.
 
 ### Running it locally
 
