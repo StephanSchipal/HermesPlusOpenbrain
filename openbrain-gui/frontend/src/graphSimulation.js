@@ -1,5 +1,5 @@
 import { select } from 'd3-selection'
-import { zoom } from 'd3-zoom'
+import { zoom, zoomIdentity } from 'd3-zoom'
 import { forceSimulation, forceX, forceY, forceCollide, forceManyBody } from 'd3-force'
 
 // A fixed, cycling color palette -- not hardcoded to however many clusters
@@ -33,6 +33,11 @@ export function renderGraph(svgEl, { keywords, clusterCount, width, height, onNo
 
   const svg = select(svgEl)
   svg.selectAll('*').remove()
+  // Re-rendering (e.g. on Refresh) resets the visible transform to identity
+  // by rebuilding zoomLayer from scratch -- also reset d3-zoom's own stored
+  // __zoom state on the node, otherwise the next zoomIn/zoomOut/scroll/drag
+  // computes its delta from a stale prior transform and the view jumps.
+  svg.property('__zoom', zoomIdentity)
 
   const zoomLayer = svg.append('g').attr('class', 'zoom-layer')
 
