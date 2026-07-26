@@ -5,7 +5,7 @@ gui.db (SQLite, via prompts_store/delete_log_store) for GUI-local
 bookkeeping (saved prompts, delete log) -- design spec section 4,
 "Architecture"."""
 from typing import Literal
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
 from app import mcp_client, prompts_store, delete_log_store, subject_line, graph
@@ -83,6 +83,28 @@ async def search(body: SearchRequest):
         parsed = mcp_client.parse_list_result(result)
     except OpenBrainMCPError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
+    rows = _rows_or_400(parsed)
+    for row in rows:
+        row["subject_line"] = subject_line.make_subject_line(row["summary"])
+    return rows
+
+@router.get("/recent")
+async def get_recent(
+    n: int = DEFAULT_SEARCH_K,
+    source: str | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
+    keywords: list[str] | None = Query(default=None),
+    keyword_mode: Literal["and", "or"] = "or",
+):
+    result = await _call("list_recent", {
+        "n": n, "source": source, "date_from": date_from, "date_to": date_to,
+        "keywords": keywords, "keyword_mode": keyword_mode,
+    })
+    try:
+        parsed = mcp_client.parse_list_result(result)
+    except OpenBrainMCPError as exc:
+        raise HTTPException(status_code=502, detail=f"openbrain-mcp unreachable: {exc}") from exc
     rows = _rows_or_400(parsed)
     for row in rows:
         row["subject_line"] = subject_line.make_subject_line(row["summary"])

@@ -222,3 +222,48 @@ def test_get_graph_mcp_failure_returns_502(client, monkeypatch):
     monkeypatch.setattr(mcp_client_module, "call_tool", fake_call_tool)
     resp = client.get("/api/graph")
     assert resp.status_code == 502
+
+def test_get_recent_passes_filters_to_mcp_tool(client, monkeypatch):
+    async def fake_call_tool(name, arguments):
+        assert name == "list_recent"
+        assert arguments == {
+            "n": 25, "source": "whatsapp", "date_from": "2026-01-01",
+            "date_to": None, "keywords": ["sarah", "job"], "keyword_mode": "or",
+        }
+        return _list_result([{"id": "a", "summary": "note", "keywords": ["sarah"]}])
+    monkeypatch.setattr(mcp_client_module, "call_tool", fake_call_tool)
+    resp = client.get("/api/recent", params={
+        "source": "whatsapp", "date_from": "2026-01-01",
+        "keywords": ["sarah", "job"],
+    })
+    assert resp.status_code == 200
+    assert resp.json()[0]["subject_line"] == "note"
+
+def test_get_recent_defaults_to_no_filters(client, monkeypatch):
+    async def fake_call_tool(name, arguments):
+        assert arguments == {
+            "n": 25, "source": None, "date_from": None, "date_to": None,
+            "keywords": None, "keyword_mode": "or",
+        }
+        return _list_result([])
+    monkeypatch.setattr(mcp_client_module, "call_tool", fake_call_tool)
+    resp = client.get("/api/recent")
+    assert resp.status_code == 200
+    assert resp.json() == []
+
+def test_get_recent_error_dict_becomes_400(client, monkeypatch):
+    async def fake_call_tool(name, arguments):
+        # Exercises the _rows_or_400 branch for this route -- list_recent's
+        # own keyword_mode check is stricter than nothing, even though the
+        # GUI's Literal type already screens the common bad-value case.
+        return _list_result({"error": "keyword_mode must be 'and' or 'or', got 'xor'"})
+    monkeypatch.setattr(mcp_client_module, "call_tool", fake_call_tool)
+    resp = client.get("/api/recent")
+    assert resp.status_code == 400
+
+def test_get_recent_mcp_failure_returns_502(client, monkeypatch):
+    async def fake_call_tool(name, arguments):
+        raise ConnectionError("connection refused")
+    monkeypatch.setattr(mcp_client_module, "call_tool", fake_call_tool)
+    resp = client.get("/api/recent")
+    assert resp.status_code == 502
