@@ -143,6 +143,7 @@ export default function App() {
   }
 
   const selectedRow = rows.find((r) => r.id === selectedId)
+  const canActOnSelection = view === 'results' && !!selectedRow
   const canLoadMore = view === 'results' && rows.length > 0 && rows.length >= searchK
 
   return (
@@ -181,13 +182,13 @@ export default function App() {
       </div>
 
       <div className="grid-actions">
-        <button disabled={!selectedRow} onClick={() => setViewingRow(selectedRow)}>
+        <button disabled={!canActOnSelection} onClick={() => setViewingRow(selectedRow)}>
           Summary
         </button>
-        <button disabled={!selectedRow} onClick={() => setEditingRow(selectedRow)}>
+        <button disabled={!canActOnSelection} onClick={() => setEditingRow(selectedRow)}>
           Change
         </button>
-        <button disabled={!selectedRow} onClick={handleDelete}>
+        <button disabled={!canActOnSelection} onClick={handleDelete}>
           Delete
         </button>
         <button onClick={() => setView((v) => (v === 'deleteLog' ? 'results' : 'deleteLog'))}>
