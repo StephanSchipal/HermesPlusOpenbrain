@@ -4,7 +4,7 @@ import { renderGraph } from './graphSimulation.js'
 import GraphLegend from './GraphLegend.jsx'
 
 const WIDTH = 700
-const HEIGHT = 420
+const HEIGHT = 840
 
 export default function KeywordGraph({ onKeywordClick }) {
   const [data, setData] = useState(null)
