@@ -132,7 +132,7 @@ Implemented in [`openbrain-mcp/app/server.py`](openbrain-mcp/app/server.py), del
 | `list_keywords()` | Read-only. Lists every distinct keyword across all captures with its frequency, most-frequent first (aggregated case-insensitively). Powers the OpenBrain GUI's keyword panel. |
 
 All except `save`/`update`'s pass-through of `metadata` are exercised by the test suite
-(`openbrain-mcp/tests/`, 36 tests, mostly run against a real Postgres+pgvector instance;
+(`openbrain-mcp/tests/`, 55 tests, mostly run against a real Postgres+pgvector instance;
 `compute_fingerprint`'s tests are the exception and need no database).
 
 ## Repository layout
@@ -148,7 +148,7 @@ openbrain-mcp/
     store.py            # save/search/recent/stats/delete/update/find_near_duplicates/cluster_captures/classify_captures/list_keywords — the only file with SQL
     server.py             # the 11 MCP tools + bearer auth + /health
   migrations/001_init.sql   # schema
-  tests/                     # 36 tests, pytest
+  tests/                     # 55 tests, pytest
   Dockerfile
   pyproject.toml
 openbrain-gui/                # Phase 1 web GUI — see its own section below
