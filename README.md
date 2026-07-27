@@ -120,8 +120,8 @@ Implemented in [`openbrain-mcp/app/server.py`](openbrain-mcp/app/server.py), del
 | Tool | Purpose |
 |---|---|
 | `save(raw_text, summary, keywords, source?, source_url?, lang?, metadata?)` | Store a note. Idempotent — resending the same link/text returns the existing id (`deduped: true`), no re-embedding. |
-| `search(query, k=5)` | Semantic search. Returns the top-k matches by meaning, each with a cosine-similarity `score`. |
-| `list_recent(n=10)` | Most recently captured notes, newest first. |
+| `search(query?, capture_id?, k=5, source?, date_from?, date_to?, keywords?, keyword_mode="or")` | Semantic search — by free text (`query`) or by an existing capture's own embedding (`capture_id`, "find similar," excludes itself from its own results); exactly one of the two is required. Optional filters: exact `source`, `date_from`/`date_to` (inclusive, by calendar day), and `keywords` (`keyword_mode` "and"/"or"). Each result includes its cosine-similarity `score`. |
+| `list_recent(n=10, source?, date_from?, date_to?, keywords?, keyword_mode="or")` | Most recently captured notes, newest first — optionally narrowed by the same source/date/keyword filters as `search`, with no query text at all. |
 | `stats()` | Total captures, counts by source, first/last capture timestamp. |
 | `delete(id)` | Remove a capture (prune a mis-capture). |
 | `update(id, summary?, keywords?, metadata?)` | Edit a capture. Changing `summary` re-embeds it. `metadata` is a full replace, not a merge. |
@@ -198,6 +198,11 @@ docker compose -f docker-compose.openbrain.yml ps   # both services should show 
 The embedding model is pinned via `OPENBRAIN_MODEL` (default `intfloat/multilingual-e5-small`,
 384-dim) — override it in `.env` if you ever want a different e5-family model, but note the
 schema's `vector(384)` column would need to match the new model's output dimension.
+
+`search`/`list_recent`'s `date_from`/`date_to` filters interpret "calendar day" in the timezone set
+via `OPENBRAIN_TIMEZONE` (an IANA name, e.g. `Europe/Vienna`; defaults to `UTC`) — set this to your
+own timezone in `.env`, or captures made in the first few hours of your local day can be
+misattributed to the previous calendar day.
 
 > The compose file references Hermes' production Docker network
 > (`hermes-agent-7qpk_default`) as external, since on the real VPS `openbrain-mcp` needs to be
@@ -326,6 +331,8 @@ Full details:
 - Phase 1 implementation plan — [`docs/superpowers/plans/2026-07-24-openbrain-gui-phase1.md`](docs/superpowers/plans/2026-07-24-openbrain-gui-phase1.md)
 - Phase 3 design spec — [`docs/superpowers/specs/2026-07-25-openbrain-gui-phase3-keyword-graph-design.md`](docs/superpowers/specs/2026-07-25-openbrain-gui-phase3-keyword-graph-design.md)
 - Phase 3 implementation plan — [`docs/superpowers/plans/2026-07-25-openbrain-gui-phase3-keyword-graph.md`](docs/superpowers/plans/2026-07-25-openbrain-gui-phase3-keyword-graph.md)
+- Search filters design spec — [`docs/superpowers/specs/2026-07-26-openbrain-gui-search-filters-design.md`](docs/superpowers/specs/2026-07-26-openbrain-gui-search-filters-design.md)
+- Search filters implementation plan — [`docs/superpowers/plans/2026-07-26-openbrain-gui-search-filters.md`](docs/superpowers/plans/2026-07-26-openbrain-gui-search-filters.md)
 
 **Architecture:** one new container (`openbrain-gui`), combining a Vite-built React SPA (served as
 static files) with a FastAPI backend, built via a multi-stage Dockerfile. The backend is the only
@@ -362,6 +369,14 @@ tool, no new `openbrain-mcp` capability needed. Hovering a bubble or a cluster i
 the captures behind it (central/most-representative ones starred); clicking a bubble inserts that
 keyword into the search prompt, same as the existing keyword-filter list. Pan/zoom via scroll,
 drag, or the on-screen +/− buttons.
+
+**Search filters, sorting & find-similar:** the search bar now sits above a filter bar (source
+dropdown, from/to date range with quick-range buttons, and its own keyword chips with an AND/OR
+toggle — separate from the existing keyword-panel/keyword-graph click-to-insert behavior, which is
+unchanged). Filters apply whether or not a search prompt is given — an empty prompt with filters
+set browses recent captures directly (`GET /api/recent`). Results can be sorted by relevance or by
+date; a "Find similar" button on each result finds neighbors of that capture by its own stored
+embedding (`capture_id` search mode), respecting whatever filters are currently active.
 
 ### Running it locally
 

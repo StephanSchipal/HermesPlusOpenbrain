@@ -13,10 +13,12 @@ un-parameterized `dict` return annotation does NOT produce `structuredContent`
 on a `CallToolResult`, only `list[...]`/`dict[str, X]`/`Union` annotations do.
 Concretely: `stats`, `delete`, `update`, and `cluster_captures` (bare `dict`)
 must be parsed from the single unstructured text block (`parse_dict_result`);
-`search`, `list_keywords`, and `list_recent` (`list[dict]`) get real
-`structuredContent`, wrapped as `{"result": [...]}` (`parse_list_result`). If
-a future `mcp` upgrade changes this behavior, re-check that trace before
-collapsing the two helpers.
+`search`, `list_keywords`, and `list_recent` (`list[dict]`, or `list[dict] |
+dict` for `search`/`list_recent`'s error-dict cases) get real
+`structuredContent`, wrapped as `{"result": [...]}` (`parse_list_result`) --
+Union return types are wrapped in `structuredContent` the same way a plain
+`list[dict]` is. If a future `mcp` upgrade changes this behavior, re-check
+that trace before collapsing the two helpers.
 """
 import json
 import httpx
@@ -66,10 +68,12 @@ def parse_dict_result(result: types.CallToolResult) -> dict:
     assert isinstance(block, types.TextContent)
     return json.loads(block.text)
 
-def parse_list_result(result: types.CallToolResult) -> list[dict]:
-    """For tools with a `list[dict]` return annotation (`search`,
-    `list_keywords`) -- these DO get structuredContent, wrapped as
-    {"result": [...]}."""
+def parse_list_result(result: types.CallToolResult) -> list[dict] | dict:
+    """For tools with a `list[dict]` (or `list[dict] | dict`, e.g. `search`'s
+    error-dict case) return annotation -- these DO get structuredContent,
+    wrapped as {"result": ...}. Callers of a tool with a Union annotation
+    must check `isinstance(result, dict)` themselves to detect the error
+    case (see routes.py's `_rows_or_400`)."""
     if result.isError:
         raise OpenBrainMCPError(_error_message(result))
     assert result.structuredContent is not None, (

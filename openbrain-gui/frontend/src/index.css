@@ -134,3 +134,37 @@ button { cursor: pointer; }
 .graph-legend { flex: 1; border-left: 1px solid var(--border); padding-left: 12px; position: relative; }
 .graph-legend .graph-tooltip { left: 48px; min-height: 110px; }
 .graph-legend-row { display: flex; align-items: center; gap: 6px; cursor: pointer; margin-bottom: 6px; }
+.filter-bar {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 12px;
+  border: 1px solid var(--border); border-radius: 4px; padding: 8px 12px; margin-bottom: 8px;
+}
+.filter-source {
+  background: var(--bg); color: var(--fg); border: 1px solid var(--border);
+  border-radius: 4px; padding: 4px 6px;
+}
+.filter-dates { display: flex; align-items: center; gap: 6px; }
+.filter-date {
+  background: var(--bg); color: var(--fg); border: 1px solid var(--border);
+  border-radius: 4px; padding: 4px 6px;
+}
+.filter-keywords { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; position: relative; }
+.filter-keywords .keyword-filter { width: 160px; }
+.keyword-mode-toggle {
+  background: var(--bg); color: var(--fg); border: 1px solid var(--border);
+  border-radius: 4px; padding: 4px 6px;
+}
+.keyword-suggestions {
+  position: absolute; top: 100%; left: 0; z-index: 4; display: flex; flex-wrap: wrap;
+  gap: 4px; background: var(--bg); border: 1px solid var(--border); border-radius: 4px;
+  padding: 6px; max-width: 320px;
+}
+.result-grid-wrapper { display: flex; flex-direction: column; gap: 6px; }
+.result-grid-header { display: flex; justify-content: space-between; align-items: center; }
+.sort-dropdown {
+  background: var(--bg); color: var(--fg); border: 1px solid var(--border);
+  border-radius: 4px; padding: 4px 6px;
+}
+.find-similar-button {
+  align-self: center; background: none; color: var(--fg); border: 1px solid var(--border);
+  border-radius: 4px; padding: 4px 8px; font-size: 12px;
+}

@@ -16,7 +16,17 @@ async function request(path, options = {}) {
 export const api = {
   getStats: () => request('/stats'),
   getKeywords: (filter) => request(`/keywords?filter=${encodeURIComponent(filter || '')}`),
-  search: (query, k) => request('/search', { method: 'POST', body: JSON.stringify({ query, k }) }),
+  search: (payload) => request('/search', { method: 'POST', body: JSON.stringify(payload) }),
+  getRecent: (params) => {
+    const query = new URLSearchParams()
+    if (params.n != null) query.set('n', params.n)
+    if (params.source) query.set('source', params.source)
+    if (params.date_from) query.set('date_from', params.date_from)
+    if (params.date_to) query.set('date_to', params.date_to)
+    for (const kw of params.keywords || []) query.append('keywords', kw)
+    if (params.keyword_mode) query.set('keyword_mode', params.keyword_mode)
+    return request(`/recent?${query.toString()}`)
+  },
   deleteCapture: (id, snapshot) =>
     request(`/captures/${id}/delete`, { method: 'POST', body: JSON.stringify(snapshot) }),
   updateCapture: (id, changes) =>

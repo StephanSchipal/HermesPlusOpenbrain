@@ -7,6 +7,7 @@ from sklearn.metrics.pairwise import cosine_similarity
 from app.keywords import normalize_keywords
 from app.embeddings import embed_passage, embed_query
 from app.fingerprint import content_fingerprint
+from app.config import CAPTURE_TIMEZONE
 
 _MIN_CAPTURES_TO_CLUSTER = 4
 _MAX_AUTO_K = 10
@@ -50,21 +51,97 @@ def save_capture(conn: psycopg.Connection, *, raw_text: str, summary: str,
     conn.commit()
     return {"id": str(new_id), "stored": True, "deduped": False}
 
-def search_captures(conn: psycopg.Connection, *, query: str, k: int = 5) -> list[dict]:
-    emb = embed_query(query)
+def search_captures(conn: psycopg.Connection, *, query: str | None = None,
+                     capture_id: str | None = None, k: int = 5,
+                     source: str | None = None, date_from: str | None = None,
+                     date_to: str | None = None, keywords: list[str] | None = None,
+                     keyword_mode: str = "or") -> list[dict] | dict:
+    """Semantic search by query text, or by an existing capture's already-stored
+    embedding (capture_id) -- excludes that capture from its own results.
+    Optional filters narrow the SQL WHERE clause itself, not a post-fetch
+    filter in the caller -- so a narrow filter combined with a small k cannot
+    silently under-return matches that exist further down the ranked list.
+    keyword_mode must be "and" (every given keyword present) or "or" (any
+    given keyword present); keyword matching is case-insensitive since
+    `keywords` is stored case-preserving (see `normalize_keywords`)."""
+    if (error := _validate_keyword_mode(keyword_mode)) is not None:
+        return error
+    if (query is None) == (capture_id is None):
+        return {"error": "exactly one of query or capture_id must be given"}
+
+    where_clauses, where_params = _build_filter_clause(
+        source=source, date_from=date_from, date_to=date_to,
+        keywords=keywords, keyword_mode=keyword_mode,
+    )
+    if capture_id is not None:
+        with conn.cursor() as cur:
+            cur.execute("SELECT embedding FROM captures WHERE id = %s", (capture_id,))
+            row = cur.fetchone()
+        if row is None:
+            return {"error": f"capture not found: {capture_id}"}
+        emb = row[0]
+        where_clauses.append("id != %s")
+        where_params.append(capture_id)
+    else:
+        emb = embed_query(query)
+
+    where_sql = f"WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
     with conn.cursor() as cur:
+        # where_sql is built from static column-name/operator literals chosen
+        # in code (never from caller-supplied strings); all caller-supplied
+        # values travel as parameters below -> injection-safe.
         cur.execute(
-            """
+            f"""
             SELECT id, summary, keywords, source, source_url, lang, created_at,
                    1 - (embedding <=> %s::vector) AS score
             FROM captures
+            {where_sql}
             ORDER BY embedding <=> %s::vector
             LIMIT %s
             """,
-            (emb, emb, k),
+            [emb, *where_params, emb, k],
         )
         rows = cur.fetchall()
     return [_row_to_result(r) for r in rows]
+
+def _validate_keyword_mode(keyword_mode: str) -> dict | None:
+    """Returns an {"error": ...} dict if keyword_mode isn't "and"/"or", else None."""
+    if keyword_mode not in ("and", "or"):
+        return {"error": f"keyword_mode must be 'and' or 'or', got {keyword_mode!r}"}
+    return None
+
+def _build_filter_clause(*, source: str | None, date_from: str | None, date_to: str | None,
+                         keywords: list[str] | None, keyword_mode: str) -> tuple[list[str], list]:
+    """Shared by search_captures and fetch_recent: builds the WHERE-clause
+    fragments and their parameters for the source/date/keyword filters.
+    Does NOT validate keyword_mode -- callers
+    already did that before this runs."""
+    clauses: list[str] = []
+    params: list = []
+    if source is not None:
+        clauses.append("source = %s")
+        params.append(source)
+    if date_from is not None:
+        # created_at is a timestamptz (a real UTC instant) -- casting it
+        # straight to ::date would use the Postgres session's own timezone
+        # (UTC unless configured), silently misattributing captures made
+        # near local midnight to the wrong calendar day. AT TIME ZONE
+        # converts to CAPTURE_TIMEZONE's wall-clock time first, so
+        # date_from/date_to mean "calendar day where the user actually is,"
+        # not "calendar day in whatever timezone Postgres happens to run in."
+        clauses.append("(created_at AT TIME ZONE %s)::date >= %s::date")
+        params.append(CAPTURE_TIMEZONE)
+        params.append(date_from)
+    if date_to is not None:
+        clauses.append("(created_at AT TIME ZONE %s)::date <= %s::date")
+        params.append(CAPTURE_TIMEZONE)
+        params.append(date_to)
+    if keywords:
+        lowered = [kw.lower() for kw in keywords]
+        op = "@>" if keyword_mode == "and" else "&&"
+        clauses.append(f"ARRAY(SELECT lower(kw) FROM unnest(keywords) AS kw) {op} %s::text[]")
+        params.append(lowered)
+    return clauses, params
 
 def find_near_duplicates(conn: psycopg.Connection, *, threshold: float = 0.95,
                          limit: int = 50) -> list[dict]:
@@ -198,16 +275,32 @@ def list_keywords(conn: psycopg.Connection) -> list[dict]:
         rows = cur.fetchall()
     return [{"keyword": r[0], "count": r[1]} for r in rows]
 
-def fetch_recent(conn: psycopg.Connection, *, n: int = 10) -> list[dict]:
+def fetch_recent(conn: psycopg.Connection, *, n: int = 10, source: str | None = None,
+                 date_from: str | None = None, date_to: str | None = None,
+                 keywords: list[str] | None = None, keyword_mode: str = "or"
+                 ) -> list[dict] | dict:
+    """Most recent captures, optionally narrowed by the same source/date/
+    keyword filters as search_captures -- no query/ranking involved, stays
+    ordered by created_at DESC. Used for filter-only browsing when there's
+    no search text at all."""
+    if (error := _validate_keyword_mode(keyword_mode)) is not None:
+        return error
+
+    where_clauses, where_params = _build_filter_clause(
+        source=source, date_from=date_from, date_to=date_to,
+        keywords=keywords, keyword_mode=keyword_mode,
+    )
+    where_sql = f"WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
     with conn.cursor() as cur:
         cur.execute(
-            """
+            f"""
             SELECT id, summary, keywords, source, source_url, lang, created_at, NULL::float
             FROM captures
+            {where_sql}
             ORDER BY created_at DESC
             LIMIT %s
             """,
-            (n,),
+            [*where_params, n],
         )
         rows = cur.fetchall()
     return [_row_to_result(r) for r in rows]

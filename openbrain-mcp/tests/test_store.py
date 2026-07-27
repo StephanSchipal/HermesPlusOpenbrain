@@ -341,3 +341,221 @@ def test_list_keywords_returns_empty_list_for_empty_corpus():
     with get_conn() as conn:
         result = store.list_keywords(conn)
     assert result == []
+
+def test_search_captures_filters_by_source():
+    _clean()
+    with get_conn() as conn:
+        store.save_capture(conn, raw_text="a", summary="a note about the weather today",
+                           keywords=["weather"], source="whatsapp")
+        store.save_capture(conn, raw_text="b", summary="a note about the weather today",
+                           keywords=["weather"], source="web")
+    with get_conn() as conn:
+        results = store.search_captures(conn, query="weather", k=10, source="whatsapp")
+    assert len(results) == 1
+    assert results[0]["source"] == "whatsapp"
+
+def test_search_captures_filters_by_date_range():
+    _clean()
+    with get_conn() as conn:
+        r_old = store.save_capture(conn, raw_text="a", summary="an old note about hiking",
+                                   keywords=["hiking"], source="other")
+        r_new = store.save_capture(conn, raw_text="b", summary="a new note about hiking",
+                                   keywords=["hiking"], source="other")
+    with get_conn() as conn:  # backdate directly -- no API path changes created_at
+        with conn.cursor() as cur:
+            cur.execute("UPDATE captures SET created_at = '2020-01-01' WHERE id = %s", (r_old["id"],))
+        conn.commit()
+    with get_conn() as conn:
+        results = store.search_captures(conn, query="hiking", k=10, date_from="2025-01-01")
+    assert {r["id"] for r in results} == {r_new["id"]}
+
+def test_search_captures_date_filter_uses_configured_timezone_not_utc(monkeypatch):
+    # created_at is stored as a real UTC instant (timestamptz). A plain
+    # ::date cast uses the Postgres session's own timezone -- for a capture
+    # made near local midnight in a non-UTC deployment, that silently
+    # misattributes it to the wrong calendar day unless the filter accounts
+    # for CAPTURE_TIMEZONE.
+    _clean()
+    with get_conn() as conn:
+        r = store.save_capture(conn, raw_text="a", summary="a note about topics",
+                               keywords=["x"], source="other")
+        with conn.cursor() as cur:
+            # 2026-07-26 23:30 UTC == 2026-07-27 01:30 in Europe/Vienna (CEST, UTC+2).
+            cur.execute("UPDATE captures SET created_at = '2026-07-26 23:30:00+00' WHERE id = %s",
+                       (r["id"],))
+        conn.commit()
+
+    monkeypatch.setattr(store, "CAPTURE_TIMEZONE", "Europe/Vienna")
+    with get_conn() as conn:
+        # Filtering for the LOCAL calendar day (2026-07-27) must include it.
+        results = store.search_captures(conn, query="topics", k=10,
+                                        date_from="2026-07-27", date_to="2026-07-27")
+    assert {x["id"] for x in results} == {r["id"]}
+
+    monkeypatch.setattr(store, "CAPTURE_TIMEZONE", "UTC")
+    with get_conn() as conn:
+        # Under a UTC-configured deployment, that same local day must NOT
+        # match -- this capture's UTC calendar day is 2026-07-26, not 07-27.
+        results_wrong_day = store.search_captures(conn, query="topics", k=10,
+                                                   date_from="2026-07-27", date_to="2026-07-27")
+    assert results_wrong_day == []
+
+def test_search_captures_keyword_filter_or_mode():
+    _clean()
+    with get_conn() as conn:
+        r_a = store.save_capture(conn, raw_text="a", summary="note one about topics",
+                                 keywords=["sarah"], source="other")
+        r_b = store.save_capture(conn, raw_text="b", summary="note two about topics",
+                                 keywords=["job"], source="other")
+        store.save_capture(conn, raw_text="c", summary="note three about topics",
+                           keywords=["unrelated"], source="other")
+    with get_conn() as conn:
+        results = store.search_captures(conn, query="topics", k=10,
+                                        keywords=["sarah", "job"], keyword_mode="or")
+    assert {r["id"] for r in results} == {r_a["id"], r_b["id"]}
+
+def test_search_captures_keyword_filter_and_mode():
+    _clean()
+    with get_conn() as conn:
+        r_both = store.save_capture(conn, raw_text="a", summary="note one about topics",
+                                    keywords=["sarah", "job"], source="other")
+        store.save_capture(conn, raw_text="b", summary="note two about topics",
+                           keywords=["sarah"], source="other")
+    with get_conn() as conn:
+        results = store.search_captures(conn, query="topics", k=10,
+                                        keywords=["sarah", "job"], keyword_mode="and")
+    assert {r["id"] for r in results} == {r_both["id"]}
+
+def test_search_captures_keyword_filter_is_case_insensitive():
+    _clean()
+    with get_conn() as conn:
+        r = store.save_capture(conn, raw_text="a", summary="a note about topics",
+                               keywords=["Sarah"], source="other")
+    with get_conn() as conn:
+        results = store.search_captures(conn, query="topics", k=10, keywords=["sarah"])
+    assert {r2["id"] for r2 in results} == {r["id"]}
+
+def test_search_captures_combines_multiple_filters():
+    _clean()
+    with get_conn() as conn:
+        r_match = store.save_capture(conn, raw_text="a", summary="a note about topics",
+                                     keywords=["sarah"], source="whatsapp")
+        store.save_capture(conn, raw_text="b", summary="a note about topics",
+                           keywords=["sarah"], source="web")            # wrong source
+        store.save_capture(conn, raw_text="c", summary="a note about topics",
+                           keywords=["unrelated"], source="whatsapp")   # wrong keyword
+    with get_conn() as conn:
+        results = store.search_captures(conn, query="topics", k=10,
+                                        source="whatsapp", keywords=["sarah"])
+    assert {r["id"] for r in results} == {r_match["id"]}
+
+def test_search_captures_rejects_invalid_keyword_mode():
+    _clean()
+    with get_conn() as conn:
+        result = store.search_captures(conn, query="anything", keyword_mode="xor")
+    assert result == {"error": "keyword_mode must be 'and' or 'or', got 'xor'"}
+
+def test_search_captures_rejects_neither_query_nor_capture_id():
+    _clean()
+    with get_conn() as conn:
+        result = store.search_captures(conn)
+    assert result == {"error": "exactly one of query or capture_id must be given"}
+
+def test_search_captures_by_capture_id_excludes_itself_and_finds_neighbors():
+    _clean()
+    id_to_topic = _save_topic_fixture()  # 15 captures, 3 topics x 5 near-duplicate-worded each
+    career_ids = [cid for cid, topic in id_to_topic.items() if topic == "career"]
+    with get_conn() as conn:
+        results = store.search_captures(conn, capture_id=career_ids[0], k=4)
+    result_ids = {r["id"] for r in results}
+    assert career_ids[0] not in result_ids
+    assert result_ids == set(career_ids[1:])  # its 4 nearest neighbors: the other career captures
+
+def test_search_captures_capture_id_respects_filters():
+    _clean()
+    id_to_topic = _save_topic_fixture()
+    career_ids = [cid for cid, topic in id_to_topic.items() if topic == "career"]
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("UPDATE captures SET source = 'whatsapp' WHERE id = %s", (career_ids[1],))
+        conn.commit()
+    with get_conn() as conn:
+        results = store.search_captures(conn, capture_id=career_ids[0], k=10, source="whatsapp")
+    assert {r["id"] for r in results} == {career_ids[1]}
+
+def test_search_captures_unknown_capture_id_returns_error():
+    _clean()
+    with get_conn() as conn:
+        result = store.search_captures(conn, capture_id="00000000-0000-0000-0000-000000000000")
+    assert result == {"error": "capture not found: 00000000-0000-0000-0000-000000000000"}
+
+def test_search_captures_rejects_both_query_and_capture_id():
+    _clean()
+    with get_conn() as conn:
+        r = store.save_capture(conn, raw_text="a", summary="a note", keywords=["x"], source="other")
+    with get_conn() as conn:
+        result = store.search_captures(conn, query="anything", capture_id=r["id"])
+    assert result == {"error": "exactly one of query or capture_id must be given"}
+
+def test_fetch_recent_filters_by_source():
+    _clean()
+    with get_conn() as conn:
+        store.save_capture(conn, raw_text="a", summary="note a", keywords=["x"], source="whatsapp")
+        store.save_capture(conn, raw_text="b", summary="note b", keywords=["x"], source="web")
+    with get_conn() as conn:
+        results = store.fetch_recent(conn, n=10, source="whatsapp")
+    assert len(results) == 1
+    assert results[0]["source"] == "whatsapp"
+
+def test_fetch_recent_filters_by_date_range():
+    _clean()
+    with get_conn() as conn:
+        r_old = store.save_capture(conn, raw_text="a", summary="old note", keywords=["x"], source="other")
+        r_new = store.save_capture(conn, raw_text="b", summary="new note", keywords=["x"], source="other")
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("UPDATE captures SET created_at = '2020-01-01' WHERE id = %s", (r_old["id"],))
+        conn.commit()
+    with get_conn() as conn:
+        results = store.fetch_recent(conn, n=10, date_from="2025-01-01")
+    assert {r["id"] for r in results} == {r_new["id"]}
+
+def test_fetch_recent_date_filter_uses_configured_timezone_not_utc(monkeypatch):
+    _clean()
+    with get_conn() as conn:
+        r = store.save_capture(conn, raw_text="a", summary="a note", keywords=["x"], source="other")
+        with conn.cursor() as cur:
+            # 2026-07-26 23:30 UTC == 2026-07-27 01:30 in Europe/Vienna (CEST, UTC+2).
+            cur.execute("UPDATE captures SET created_at = '2026-07-26 23:30:00+00' WHERE id = %s",
+                       (r["id"],))
+        conn.commit()
+
+    monkeypatch.setattr(store, "CAPTURE_TIMEZONE", "Europe/Vienna")
+    with get_conn() as conn:
+        results = store.fetch_recent(conn, n=10, date_from="2026-07-27", date_to="2026-07-27")
+    assert {x["id"] for x in results} == {r["id"]}
+
+def test_fetch_recent_filters_by_keywords_and_mode():
+    _clean()
+    with get_conn() as conn:
+        r_both = store.save_capture(conn, raw_text="a", summary="note",
+                                    keywords=["sarah", "job"], source="other")
+        store.save_capture(conn, raw_text="b", summary="note", keywords=["sarah"], source="other")
+    with get_conn() as conn:
+        results = store.fetch_recent(conn, n=10, keywords=["sarah", "job"], keyword_mode="and")
+    assert {r["id"] for r in results} == {r_both["id"]}
+
+def test_fetch_recent_rejects_invalid_keyword_mode():
+    _clean()
+    with get_conn() as conn:
+        result = store.fetch_recent(conn, keyword_mode="xor")
+    assert result == {"error": "keyword_mode must be 'and' or 'or', got 'xor'"}
+
+def test_fetch_recent_still_orders_by_created_at_desc_with_filters():
+    _clean()
+    with get_conn() as conn:
+        r1 = store.save_capture(conn, raw_text="a", summary="note one", keywords=["x"], source="other")
+        r2 = store.save_capture(conn, raw_text="b", summary="note two", keywords=["x"], source="other")
+    with get_conn() as conn:
+        results = store.fetch_recent(conn, n=10, source="other")
+    assert [r["id"] for r in results] == [r2["id"], r1["id"]]  # newest first

@@ -470,7 +470,27 @@ Vier Fähigkeiten, die als neue MCP-Tools nach dem bestehenden Muster
    Plan:
    [`docs/superpowers/plans/2026-07-25-openbrain-gui-phase3-keyword-graph.md`](docs/superpowers/plans/2026-07-25-openbrain-gui-phase3-keyword-graph.md).
 
-Damit sind alle 4 ursprünglich geplanten MCP-Fähigkeiten sowie Phase 1 und
-Phase 3 der Web-GUI umgesetzt und deployed (Phase 2 bewusst übersprungen).
-Details zu jeder einzelnen siehe die jeweiligen Spec-/Plan-Dokumente unter
-`docs/superpowers/`.
+7. ✅ **Web-GUI — Suchfilter, Sortierung & "Ähnliche finden"** (`openbrain-gui`) —
+   `search`/`list_recent` in `openbrain-mcp` bekamen optionale Filter
+   (Quelle, Zeitraum nach Kalendertag, Keywords mit UND/ODER, case-
+   insensitiv) direkt in der SQL-`WHERE`-Klausel — keine nachträgliche
+   client-seitige Filterung eines kleinen Top-k, die bei engen Filtern
+   fälschlich leere Ergebnisse liefern könnte. `search` bekam zusätzlich
+   einen `capture_id`-Modus ("Ähnliche finden"): nutzt das bereits
+   gespeicherte Embedding einer bestehenden Notiz statt neu zu embedden,
+   schließt die Quell-Notiz aus den Ergebnissen aus, respektiert aktive
+   Filter. Neue GUI-eigene `FilterBar` (Quelle-Dropdown, Von/Bis-Datum +
+   Schnellauswahl-Buttons, eigene Keyword-Filter-Chips mit UND/ODER-Toggle —
+   bewusst getrennt vom bestehenden Keyword-Panel/-Graph, deren Klick-fügt-
+   Text-ein-Verhalten unverändert bleibt), Sortier-Dropdown (Relevanz/Datum)
+   im Ergebnis-Grid, Trefferzahl-Anzeige, und ein "Ähnliche finden"-Button
+   pro Ergebnis-Zeile. Neuer `GET /api/recent`-Endpunkt für reines Filter-
+   Browsen ohne Suchtext. Spec:
+   [`docs/superpowers/specs/2026-07-26-openbrain-gui-search-filters-design.md`](docs/superpowers/specs/2026-07-26-openbrain-gui-search-filters-design.md),
+   Plan:
+   [`docs/superpowers/plans/2026-07-26-openbrain-gui-search-filters.md`](docs/superpowers/plans/2026-07-26-openbrain-gui-search-filters.md).
+
+Damit sind alle 4 ursprünglich geplanten MCP-Fähigkeiten, Phase 1 und Phase 3
+der Web-GUI, sowie deren Suchfilter-Erweiterung umgesetzt und deployed
+(Phase 2 bewusst übersprungen). Details zu jeder einzelnen siehe die
+jeweiligen Spec-/Plan-Dokumente unter `docs/superpowers/`.

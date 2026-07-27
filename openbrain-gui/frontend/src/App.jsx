@@ -9,6 +9,7 @@ import DeleteLogView from './DeleteLogView.jsx'
 import ChangePopup from './ChangePopup.jsx'
 import SummaryPopup from './SummaryPopup.jsx'
 import KeywordGraph from './KeywordGraph.jsx'
+import FilterBar from './FilterBar.jsx'
 
 const SEARCH_PAGE_SIZE = 25
 
@@ -19,6 +20,9 @@ export default function App() {
   const [selectedPromptId, setSelectedPromptId] = useState('')
   const [rows, setRows] = useState([])
   const [searchK, setSearchK] = useState(SEARCH_PAGE_SIZE)
+  const [filters, setFilters] = useState({
+    source: '', date_from: '', date_to: '', keywords: [], keyword_mode: 'or',
+  })
   const [searching, setSearching] = useState(false)
   const [selectedId, setSelectedId] = useState(null)
   const [view, setView] = useState('results') // 'results' | 'deleteLog' | 'graph'
@@ -26,7 +30,18 @@ export default function App() {
   const [viewingRow, setViewingRow] = useState(null)
   const [error, setError] = useState(null)
   const [notice, setNotice] = useState(null)
+  const [hasSearched, setHasSearched] = useState(false)
+  // Bumped only when a genuinely new search/browse/find-similar result set
+  // commits -- NOT when rows is updated in place by handleDelete/handleChangeSave.
+  // ResultGrid keys its default-sort-reset off this instead of `rows` itself,
+  // since `rows` also gets a new array reference from those in-place edits.
+  const [resultsVersion, setResultsVersion] = useState(0)
   const promptTextareaRef = useRef(null)
+  // Bumped at the start of every search/browse/find-similar; a request only
+  // commits its results if it's still the most recent one when it resolves --
+  // guards against a slower, stale request (e.g. filters changed mid-flight)
+  // silently overwriting a newer one's results.
+  const searchTokenRef = useRef(0)
 
   useEffect(() => {
     // Resolve both mount-time fetches before touching `error` once -- doing
@@ -53,28 +68,87 @@ export default function App() {
     setPrompt(prompt.slice(0, start) + keyword + prompt.slice(end))
   }
 
+  const activeFilterPayload = () => ({
+    source: filters.source || undefined,
+    date_from: filters.date_from || undefined,
+    date_to: filters.date_to || undefined,
+    keywords: filters.keywords.length ? filters.keywords : undefined,
+    keyword_mode: filters.keyword_mode,
+  })
+
+  const hasActiveFilters = Boolean(
+    filters.source || filters.date_from || filters.date_to || filters.keywords.length
+  )
+
   const runSearch = async (k) => {
+    const token = ++searchTokenRef.current
     setSearching(true)
     try {
-      const results = await api.search(prompt, k)
+      const results = await api.search({ query: prompt, k, ...activeFilterPayload() })
+      if (token !== searchTokenRef.current) return  // a newer request already won
       setRows(results)
       setSearchK(k)
+      setResultsVersion((v) => v + 1)
       setError(null)
     } catch (err) {
-      setError(err.message)
+      if (token === searchTokenRef.current) setError(err.message)
     } finally {
-      setSearching(false)
+      if (token === searchTokenRef.current) setSearching(false)
+    }
+  }
+
+  const runBrowse = async (n) => {
+    const token = ++searchTokenRef.current
+    setSearching(true)
+    try {
+      const results = await api.getRecent({ n, ...activeFilterPayload() })
+      if (token !== searchTokenRef.current) return
+      setRows(results)
+      setSearchK(n)
+      setResultsVersion((v) => v + 1)
+      setError(null)
+    } catch (err) {
+      if (token === searchTokenRef.current) setError(err.message)
+    } finally {
+      if (token === searchTokenRef.current) setSearching(false)
     }
   }
 
   const handleSearch = async () => {
-    if (!prompt.trim()) return
     setSelectedId(null)
     setView('results')
-    await runSearch(SEARCH_PAGE_SIZE)
+    setHasSearched(true)
+    if (prompt.trim()) {
+      await runSearch(SEARCH_PAGE_SIZE)
+    } else {
+      await runBrowse(SEARCH_PAGE_SIZE)
+    }
   }
 
-  const handleLoadMore = () => runSearch(searchK + SEARCH_PAGE_SIZE)
+  const handleLoadMore = () =>
+    prompt.trim() ? runSearch(searchK + SEARCH_PAGE_SIZE) : runBrowse(searchK + SEARCH_PAGE_SIZE)
+
+  const handleFindSimilar = async (row) => {
+    setSelectedId(null)
+    setView('results')
+    setHasSearched(true)
+    const token = ++searchTokenRef.current
+    setSearching(true)
+    try {
+      const results = await api.search({
+        capture_id: row.id, k: SEARCH_PAGE_SIZE, ...activeFilterPayload(),
+      })
+      if (token !== searchTokenRef.current) return
+      setRows(results)
+      setSearchK(SEARCH_PAGE_SIZE)
+      setResultsVersion((v) => v + 1)
+      setError(null)
+    } catch (err) {
+      if (token === searchTokenRef.current) setError(err.message)
+    } finally {
+      if (token === searchTokenRef.current) setSearching(false)
+    }
+  }
 
   const handleSavePrompt = async () => {
     if (!prompt.trim()) return
@@ -145,6 +219,10 @@ export default function App() {
   const selectedRow = rows.find((r) => r.id === selectedId)
   const canActOnSelection = view === 'results' && !!selectedRow
   const canLoadMore = view === 'results' && rows.length > 0 && rows.length >= searchK
+  const hitCountLabel = view === 'results' && hasSearched
+    ? `${rows.length} result${rows.length === 1 ? '' : 's'}`
+      + (hasActiveFilters && stats ? ` (filtered from ${stats.total})` : '')
+    : null
 
   return (
     <div className="app">
@@ -181,6 +259,12 @@ export default function App() {
         <KeywordPanel onKeywordClick={handleKeywordClick} />
       </div>
 
+      <FilterBar
+        sources={stats ? Object.keys(stats.by_source) : []}
+        filters={filters}
+        onFiltersChange={setFilters}
+      />
+
       <div className="grid-actions">
         <button disabled={!canActOnSelection} onClick={() => setViewingRow(selectedRow)}>
           Summary
@@ -206,7 +290,15 @@ export default function App() {
       ) : searching ? (
         <p className="grid-empty">Searching…</p>
       ) : (
-        <ResultGrid rows={rows} selectedId={selectedId} onSelect={setSelectedId} />
+        <ResultGrid
+          rows={rows}
+          selectedId={selectedId}
+          onSelect={setSelectedId}
+          onFindSimilar={handleFindSimilar}
+          hitCountLabel={hitCountLabel}
+          hasSearched={hasSearched}
+          resultsVersion={resultsVersion}
+        />
       )}
 
       {canLoadMore && (
