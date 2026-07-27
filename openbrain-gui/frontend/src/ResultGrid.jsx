@@ -7,13 +7,20 @@ function sortRows(rows, sortBy) {
   return rows // 'relevance' -- already ordered by the backend
 }
 
-export default function ResultGrid({ rows, selectedId, onSelect, onFindSimilar, hitCountLabel, hasSearched }) {
+export default function ResultGrid({
+  rows, selectedId, onSelect, onFindSimilar, hitCountLabel, hasSearched, resultsVersion,
+}) {
   const hasRelevance = rows.length > 0 && rows[0].score != null
   const [sortBy, setSortBy] = useState(hasRelevance ? 'relevance' : 'date_desc')
 
   useEffect(() => {
     setSortBy(hasRelevance ? 'relevance' : 'date_desc')
-  }, [rows, hasRelevance])
+    // Keyed on resultsVersion, not `rows` -- `rows` also gets a new array
+    // reference from in-place edits (delete/change a row in the current
+    // result set), which must NOT reset the user's chosen sort order. Only a
+    // genuinely new search/browse/find-similar bumps resultsVersion.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [resultsVersion])
 
   const sortedRows = useMemo(() => sortRows(rows, sortBy), [rows, sortBy])
 

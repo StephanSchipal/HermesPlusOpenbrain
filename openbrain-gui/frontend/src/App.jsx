@@ -31,6 +31,11 @@ export default function App() {
   const [error, setError] = useState(null)
   const [notice, setNotice] = useState(null)
   const [hasSearched, setHasSearched] = useState(false)
+  // Bumped only when a genuinely new search/browse/find-similar result set
+  // commits -- NOT when rows is updated in place by handleDelete/handleChangeSave.
+  // ResultGrid keys its default-sort-reset off this instead of `rows` itself,
+  // since `rows` also gets a new array reference from those in-place edits.
+  const [resultsVersion, setResultsVersion] = useState(0)
   const promptTextareaRef = useRef(null)
   // Bumped at the start of every search/browse/find-similar; a request only
   // commits its results if it's still the most recent one when it resolves --
@@ -83,6 +88,7 @@ export default function App() {
       if (token !== searchTokenRef.current) return  // a newer request already won
       setRows(results)
       setSearchK(k)
+      setResultsVersion((v) => v + 1)
       setError(null)
     } catch (err) {
       if (token === searchTokenRef.current) setError(err.message)
@@ -99,6 +105,7 @@ export default function App() {
       if (token !== searchTokenRef.current) return
       setRows(results)
       setSearchK(n)
+      setResultsVersion((v) => v + 1)
       setError(null)
     } catch (err) {
       if (token === searchTokenRef.current) setError(err.message)
@@ -134,6 +141,7 @@ export default function App() {
       if (token !== searchTokenRef.current) return
       setRows(results)
       setSearchK(SEARCH_PAGE_SIZE)
+      setResultsVersion((v) => v + 1)
       setError(null)
     } catch (err) {
       if (token === searchTokenRef.current) setError(err.message)
@@ -289,6 +297,7 @@ export default function App() {
           onFindSimilar={handleFindSimilar}
           hitCountLabel={hitCountLabel}
           hasSearched={hasSearched}
+          resultsVersion={resultsVersion}
         />
       )}
 
