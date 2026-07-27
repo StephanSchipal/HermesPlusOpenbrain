@@ -23,6 +23,7 @@ services:
     environment:
       DATABASE_URL: postgresql://openbrain:${POSTGRES_PASSWORD}@openbrain-db:5432/openbrain
       OPENBRAIN_TOKEN: ${OPENBRAIN_TOKEN}
+      OPENBRAIN_TIMEZONE: ${OPENBRAIN_TIMEZONE:-UTC}
     depends_on:
       openbrain-db:
         condition: service_healthy
