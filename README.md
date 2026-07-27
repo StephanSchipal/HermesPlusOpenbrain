@@ -199,6 +199,11 @@ The embedding model is pinned via `OPENBRAIN_MODEL` (default `intfloat/multiling
 384-dim) — override it in `.env` if you ever want a different e5-family model, but note the
 schema's `vector(384)` column would need to match the new model's output dimension.
 
+`search`/`list_recent`'s `date_from`/`date_to` filters interpret "calendar day" in the timezone set
+via `OPENBRAIN_TIMEZONE` (an IANA name, e.g. `Europe/Vienna`; defaults to `UTC`) — set this to your
+own timezone in `.env`, or captures made in the first few hours of your local day can be
+misattributed to the previous calendar day.
+
 > The compose file references Hermes' production Docker network
 > (`hermes-agent-7qpk_default`) as external, since on the real VPS `openbrain-mcp` needs to be
 > reachable from Hermes by container name. That network only exists there. To bring up the full
