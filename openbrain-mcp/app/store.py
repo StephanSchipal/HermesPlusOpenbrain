@@ -7,6 +7,7 @@ from sklearn.metrics.pairwise import cosine_similarity
 from app.keywords import normalize_keywords
 from app.embeddings import embed_passage, embed_query
 from app.fingerprint import content_fingerprint
+from app.config import CAPTURE_TIMEZONE
 
 _MIN_CAPTURES_TO_CLUSTER = 4
 _MAX_AUTO_K = 10
@@ -121,10 +122,19 @@ def _build_filter_clause(*, source: str | None, date_from: str | None, date_to: 
         clauses.append("source = %s")
         params.append(source)
     if date_from is not None:
-        clauses.append("created_at::date >= %s::date")
+        # created_at is a timestamptz (a real UTC instant) -- casting it
+        # straight to ::date would use the Postgres session's own timezone
+        # (UTC unless configured), silently misattributing captures made
+        # near local midnight to the wrong calendar day. AT TIME ZONE
+        # converts to CAPTURE_TIMEZONE's wall-clock time first, so
+        # date_from/date_to mean "calendar day where the user actually is,"
+        # not "calendar day in whatever timezone Postgres happens to run in."
+        clauses.append("(created_at AT TIME ZONE %s)::date >= %s::date")
+        params.append(CAPTURE_TIMEZONE)
         params.append(date_from)
     if date_to is not None:
-        clauses.append("created_at::date <= %s::date")
+        clauses.append("(created_at AT TIME ZONE %s)::date <= %s::date")
+        params.append(CAPTURE_TIMEZONE)
         params.append(date_to)
     if keywords:
         lowered = [kw.lower() for kw in keywords]

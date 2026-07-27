@@ -369,6 +369,37 @@ def test_search_captures_filters_by_date_range():
         results = store.search_captures(conn, query="hiking", k=10, date_from="2025-01-01")
     assert {r["id"] for r in results} == {r_new["id"]}
 
+def test_search_captures_date_filter_uses_configured_timezone_not_utc(monkeypatch):
+    # created_at is stored as a real UTC instant (timestamptz). A plain
+    # ::date cast uses the Postgres session's own timezone -- for a capture
+    # made near local midnight in a non-UTC deployment, that silently
+    # misattributes it to the wrong calendar day unless the filter accounts
+    # for CAPTURE_TIMEZONE.
+    _clean()
+    with get_conn() as conn:
+        r = store.save_capture(conn, raw_text="a", summary="a note about topics",
+                               keywords=["x"], source="other")
+        with conn.cursor() as cur:
+            # 2026-07-26 23:30 UTC == 2026-07-27 01:30 in Europe/Vienna (CEST, UTC+2).
+            cur.execute("UPDATE captures SET created_at = '2026-07-26 23:30:00+00' WHERE id = %s",
+                       (r["id"],))
+        conn.commit()
+
+    monkeypatch.setattr(store, "CAPTURE_TIMEZONE", "Europe/Vienna")
+    with get_conn() as conn:
+        # Filtering for the LOCAL calendar day (2026-07-27) must include it.
+        results = store.search_captures(conn, query="topics", k=10,
+                                        date_from="2026-07-27", date_to="2026-07-27")
+    assert {x["id"] for x in results} == {r["id"]}
+
+    monkeypatch.setattr(store, "CAPTURE_TIMEZONE", "UTC")
+    with get_conn() as conn:
+        # Under a UTC-configured deployment, that same local day must NOT
+        # match -- this capture's UTC calendar day is 2026-07-26, not 07-27.
+        results_wrong_day = store.search_captures(conn, query="topics", k=10,
+                                                   date_from="2026-07-27", date_to="2026-07-27")
+    assert results_wrong_day == []
+
 def test_search_captures_keyword_filter_or_mode():
     _clean()
     with get_conn() as conn:
@@ -488,6 +519,21 @@ def test_fetch_recent_filters_by_date_range():
     with get_conn() as conn:
         results = store.fetch_recent(conn, n=10, date_from="2025-01-01")
     assert {r["id"] for r in results} == {r_new["id"]}
+
+def test_fetch_recent_date_filter_uses_configured_timezone_not_utc(monkeypatch):
+    _clean()
+    with get_conn() as conn:
+        r = store.save_capture(conn, raw_text="a", summary="a note", keywords=["x"], source="other")
+        with conn.cursor() as cur:
+            # 2026-07-26 23:30 UTC == 2026-07-27 01:30 in Europe/Vienna (CEST, UTC+2).
+            cur.execute("UPDATE captures SET created_at = '2026-07-26 23:30:00+00' WHERE id = %s",
+                       (r["id"],))
+        conn.commit()
+
+    monkeypatch.setattr(store, "CAPTURE_TIMEZONE", "Europe/Vienna")
+    with get_conn() as conn:
+        results = store.fetch_recent(conn, n=10, date_from="2026-07-27", date_to="2026-07-27")
+    assert {x["id"] for x in results} == {r["id"]}
 
 def test_fetch_recent_filters_by_keywords_and_mode():
     _clean()
