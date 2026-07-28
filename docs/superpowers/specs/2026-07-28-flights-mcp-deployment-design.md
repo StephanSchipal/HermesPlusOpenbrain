@@ -2,7 +2,14 @@
 
 **Date:** 2026-07-28
 **Author:** Stephan (with Claude Code, brainstorming session 2026-07-28)
-**Status:** Approved design — ready for implementation planning
+**Status:** SUPERSEDED — see `2026-07-28-flights-mcp-stdio-design.md`
+
+> **Why superseded:** This design assumed Hermes-Agent only registers MCP servers over
+> streamable-HTTP. That assumption was wrong — Hermes' MCP dashboard supports a `stdio` transport
+> and already runs other servers that way (e.g. `uvx blender-mcp==1.6.4` in its own Catalog), which
+> makes the entire Docker/HTTP-wrapper/vendoring approach below unnecessary. Kept for history —
+> the `host="0.0.0.0"` DNS-rebinding finding (§2) is still real, just not relevant to a stdio
+> deployment.
 
 ---
 

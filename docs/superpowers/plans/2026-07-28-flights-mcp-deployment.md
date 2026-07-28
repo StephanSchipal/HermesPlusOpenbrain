@@ -1,5 +1,10 @@
 # flights-mcp on Hostinger — Streamable-HTTP Deployment Implementation Plan
 
+> **SUPERSEDED 2026-07-28** — see `2026-07-28-flights-mcp-stdio-design.md` and its plan. Hermes
+> supports `stdio`-transport MCP servers directly (confirmed via its dashboard's Catalog, e.g.
+> `uvx blender-mcp==1.6.4`), making this whole Docker/HTTP-wrapper approach unnecessary. No tasks
+> below were executed — the worktree/branch created for this plan was removed unused.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Deploy `flights-mcp` (Duffel-API flight search) as a streamable-HTTP MCP service on the
