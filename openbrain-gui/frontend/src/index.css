@@ -53,12 +53,20 @@ body {
   color: #060;
 }
 .top-row { display: flex; gap: 16px; margin: 12px 0; }
-.prompt-bar { flex: 2; display: flex; flex-direction: column; gap: 8px; }
+.prompt-column { flex: 2; display: flex; flex-direction: column; gap: 8px; }
+.prompt-bar { display: flex; flex-direction: column; gap: 8px; }
 .prompt-dropdown, .prompt-textarea, .keyword-filter {
   width: 100%; background: var(--bg); color: var(--fg);
   border: 1px solid var(--border); border-radius: 4px; padding: 6px;
 }
-.prompt-actions { display: flex; gap: 8px; }
+.prompt-actions { display: flex; gap: 8px; align-items: center; }
+.prompt-actions button {
+  font-size: 14px; padding: 6px 14px; background: var(--bg); color: var(--fg);
+  border: 1px solid var(--border); border-radius: 4px;
+}
+.prompt-actions .search-button {
+  font-size: 19px; padding: 8px 19px; font-weight: 600;
+}
 .textarea-wrapper { position: relative; }
 .textarea-wrapper .prompt-textarea { padding-right: 26px; }
 .textarea-clear {
@@ -144,6 +152,10 @@ button { cursor: pointer; }
 }
 .filter-dates { display: flex; align-items: center; gap: 6px; }
 .filter-date {
+  background: var(--bg); color: var(--fg); border: 1px solid var(--border);
+  border-radius: 4px; padding: 4px 6px;
+}
+.filter-quick-range {
   background: var(--bg); color: var(--fg); border: 1px solid var(--border);
   border-radius: 4px; padding: 4px 6px;
 }

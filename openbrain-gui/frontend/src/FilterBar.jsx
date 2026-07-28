@@ -11,9 +11,17 @@ function isoDate(d) {
   return `${y}-${m}-${day}`
 }
 
+const QUICK_RANGES = [
+  { value: 'all', label: 'All' },
+  { value: '7', label: 'Last 7 days' },
+  { value: '30', label: 'Last month' },
+  { value: 'year', label: 'This year' },
+]
+
 export default function FilterBar({ sources, filters, onFiltersChange }) {
   const [keywordInput, setKeywordInput] = useState('')
   const [suggestions, setSuggestions] = useState([])
+  const [quickRange, setQuickRange] = useState('all')
 
   useEffect(() => {
     if (!keywordInput) { setSuggestions([]); return }
@@ -36,6 +44,13 @@ export default function FilterBar({ sources, filters, onFiltersChange }) {
     update({ date_from: isoDate(from), date_to: isoDate(to) })
   }
 
+  const handleQuickRangeChange = (value) => {
+    setQuickRange(value)
+    if (value === 'all') update({ date_from: '', date_to: '' })
+    else if (value === 'year') applyQuickRange(null)
+    else applyQuickRange(Number(value))
+  }
+
   const addKeyword = (kw) => {
     if (!kw || filters.keywords.includes(kw)) return
     update({ keywords: [...filters.keywords, kw] })
@@ -45,8 +60,10 @@ export default function FilterBar({ sources, filters, onFiltersChange }) {
 
   const removeKeyword = (kw) => update({ keywords: filters.keywords.filter((k) => k !== kw) })
 
-  const reset = () =>
+  const reset = () => {
+    setQuickRange('all')
     onFiltersChange({ source: '', date_from: '', date_to: '', keywords: [], keyword_mode: 'or' })
+  }
 
   return (
     <div className="filter-bar">
@@ -73,9 +90,13 @@ export default function FilterBar({ sources, filters, onFiltersChange }) {
           value={filters.date_to}
           onChange={(e) => update({ date_to: e.target.value })}
         />
-        <button type="button" onClick={() => applyQuickRange(7)}>7 days</button>
-        <button type="button" onClick={() => applyQuickRange(30)}>1 month</button>
-        <button type="button" onClick={() => applyQuickRange(null)}>This year</button>
+        <select
+          className="filter-quick-range"
+          value={quickRange}
+          onChange={(e) => handleQuickRangeChange(e.target.value)}
+        >
+          {QUICK_RANGES.map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
+        </select>
       </div>
 
       <div className="filter-keywords">

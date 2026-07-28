@@ -1,8 +1,7 @@
 export default function PromptBar({
   prompt, onPromptChange, promptTextareaRef,
   savedPrompts, onSelectSavedPrompt,
-  onSearch, onSavePrompt, onDeleteSavedPrompt, selectedPromptId,
-  searching,
+  onSearch, selectedPromptId,
 }) {
   const handleKeyDown = (e) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -46,15 +45,6 @@ export default function PromptBar({
             ✕
           </button>
         )}
-      </div>
-      <div className="prompt-actions">
-        <button onClick={onSearch} disabled={searching}>
-          {searching ? 'Searching…' : 'Search'}
-        </button>
-        <button onClick={onSavePrompt}>Save prompt</button>
-        <button onClick={onDeleteSavedPrompt} disabled={!selectedPromptId}>
-          Delete prompt
-        </button>
       </div>
     </div>
   )

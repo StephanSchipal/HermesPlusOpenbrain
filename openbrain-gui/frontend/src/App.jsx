@@ -244,26 +244,33 @@ export default function App() {
       )}
 
       <div className="top-row">
-        <PromptBar
-          prompt={prompt}
-          onPromptChange={setPrompt}
-          promptTextareaRef={promptTextareaRef}
-          savedPrompts={savedPrompts}
-          selectedPromptId={selectedPromptId}
-          onSelectSavedPrompt={handleSelectSavedPrompt}
-          onSearch={handleSearch}
-          onSavePrompt={handleSavePrompt}
-          onDeleteSavedPrompt={handleDeleteSavedPrompt}
-          searching={searching}
-        />
+        <div className="prompt-column">
+          <PromptBar
+            prompt={prompt}
+            onPromptChange={setPrompt}
+            promptTextareaRef={promptTextareaRef}
+            savedPrompts={savedPrompts}
+            selectedPromptId={selectedPromptId}
+            onSelectSavedPrompt={handleSelectSavedPrompt}
+            onSearch={handleSearch}
+          />
+          <FilterBar
+            sources={stats ? Object.keys(stats.by_source) : []}
+            filters={filters}
+            onFiltersChange={setFilters}
+          />
+          <div className="prompt-actions">
+            <button className="search-button" onClick={handleSearch} disabled={searching}>
+              {searching ? 'Searching…' : 'Search'}
+            </button>
+            <button onClick={handleSavePrompt}>Save prompt</button>
+            <button onClick={handleDeleteSavedPrompt} disabled={!selectedPromptId}>
+              Delete prompt
+            </button>
+          </div>
+        </div>
         <KeywordPanel onKeywordClick={handleKeywordClick} />
       </div>
-
-      <FilterBar
-        sources={stats ? Object.keys(stats.by_source) : []}
-        filters={filters}
-        onFiltersChange={setFilters}
-      />
 
       <div className="grid-actions">
         <button disabled={!canActOnSelection} onClick={() => setViewingRow(selectedRow)}>
