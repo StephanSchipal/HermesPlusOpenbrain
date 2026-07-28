@@ -35,5 +35,5 @@ export const api = {
   savePrompt: (text) => request('/prompts', { method: 'POST', body: JSON.stringify({ text }) }),
   deletePrompt: (id) => request(`/prompts/${id}`, { method: 'DELETE' }),
   getDeleteLog: (limit) => request(`/delete-log${limit ? `?limit=${limit}` : ''}`),
-  getGraph: () => request('/graph'),
+  getGraph: (k) => request(`/graph${k ? `?k=${k}` : ''}`),
 }

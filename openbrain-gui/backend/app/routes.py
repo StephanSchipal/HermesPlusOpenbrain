@@ -167,14 +167,17 @@ def get_delete_log(limit: int = DEFAULT_DELETE_LOG_LIMIT):
     return delete_log_store.list_deletions(limit=limit)
 
 @router.get("/graph")
-async def get_graph():
+async def get_graph(k: int | None = Query(default=None, ge=1)):
     captures_result = await _call("list_recent", {"n": GRAPH_MAX_CAPTURES})
     try:
         captures = mcp_client.parse_list_result(captures_result)
     except OpenBrainMCPError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
-    cluster_result = await _call("cluster_captures", {"k": None})
+    if k is not None and k > len(captures):
+        raise HTTPException(status_code=400, detail=f"k must be between 1 and {len(captures)}, got {k}")
+
+    cluster_result = await _call("cluster_captures", {"k": k})
     try:
         cluster_data = mcp_client.parse_dict_result(cluster_result)
     except OpenBrainMCPError as exc:
