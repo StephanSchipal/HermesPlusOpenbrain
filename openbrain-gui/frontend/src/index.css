@@ -73,7 +73,7 @@ body {
 .textarea-clear:hover { opacity: 1; }
 .keyword-panel { flex: 1; display: flex; flex-direction: column; gap: 6px; }
 .keyword-list {
-  max-height: 88px; overflow-y: auto; display: flex; flex-wrap: wrap;
+  max-height: 165px; overflow-y: auto; display: flex; flex-wrap: wrap;
   gap: 4px; align-content: flex-start;
 }
 .keyword-chip {
