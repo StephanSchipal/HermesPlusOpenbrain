@@ -405,6 +405,21 @@ boundary except the SQLite stores, which use real throwaway files):
 cd openbrain-gui/backend && python -m pytest tests/ -v
 ```
 
+## Related: Laptop-Dateizugriff via Tailscale
+
+Ein weiterer, unabhängiger Baustein auf demselben Hermes-Agent: kontrollierter Lese-/Schreibzugriff
+auf ein einzelnes, selbst gewähltes Verzeichnis auf einem Laptop — nicht auf der VPS. Da ein Laptop
+kein Server ist (wechselnde IP, NAT, nicht immer online), läuft die Verbindung über ein privates
+Tailscale-VPN statt über eine öffentliche Portfreigabe. Auf dem Laptop läuft ein MCP-Filesystem-Server
+(`@modelcontextprotocol/server-filesystem`, gebridged via `supergateway` auf HTTP), erreichbar für
+Hermes nur über die Tailscale-IP und zusätzlich per Windows-Firewall auf das Tailscale-Subnetz
+beschränkt; der Filesystem-Server selbst erzwingt zusätzlich eine harte Verzeichnis-Whitelist. Ein
+Windows Scheduled Task hält den Server dauerhaft am Laufen.
+
+> Status: **Live** (seit 2026-07-29) — freigegebenes Verzeichnis: `D:\projects\Hermes`
+
+Full details: [`Tailscale.md`](Tailscale.md).
+
 ## Related: Hermes Voice (Twilio)
 
 A separate, parallel channel on the same VPS — not part of OpenBrain, but deployed alongside it on
