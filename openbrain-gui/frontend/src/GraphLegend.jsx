@@ -28,11 +28,11 @@ export default function GraphLegend({ clusters, activeClusters, onToggle }) {
         <div className="graph-tooltip">
           <strong>{hoveredCluster.label} — {hoveredCluster.size} captures</strong>
           <ul>
-            {hoveredCluster.captures.slice(0, 3).map((c) => (
+            {hoveredCluster.captures.slice(0, 20).map((c) => (
               <li key={c.id}>{c.central ? '★ ' : ''}{c.subject_line}</li>
             ))}
-            {hoveredCluster.captures.length > 3 && (
-              <li>+{hoveredCluster.captures.length - 3} more</li>
+            {hoveredCluster.captures.length > 20 && (
+              <li>+{hoveredCluster.captures.length - 20} more</li>
             )}
           </ul>
         </div>
