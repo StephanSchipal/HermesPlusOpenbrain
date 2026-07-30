@@ -120,11 +120,11 @@ Implemented in [`openbrain-mcp/app/server.py`](openbrain-mcp/app/server.py), del
 | Tool | Purpose |
 |---|---|
 | `save(raw_text, summary, keywords, source?, source_url?, lang?, metadata?)` | Store a note. Idempotent — resending the same link/text returns the existing id (`deduped: true`), no re-embedding. |
-| `search(query?, capture_id?, k=5, source?, date_from?, date_to?, keywords?, keyword_mode="or")` | Semantic search — by free text (`query`) or by an existing capture's own embedding (`capture_id`, "find similar," excludes itself from its own results); exactly one of the two is required. Optional filters: exact `source`, `date_from`/`date_to` (inclusive, by calendar day), and `keywords` (`keyword_mode` "and"/"or"). Each result includes its cosine-similarity `score`. |
-| `list_recent(n=10, source?, date_from?, date_to?, keywords?, keyword_mode="or")` | Most recently captured notes, newest first — optionally narrowed by the same source/date/keyword filters as `search`, with no query text at all. |
+| `search(query?, capture_id?, k=5, source?, date_from?, date_to?, keywords?, keyword_mode="or")` | Semantic search — by free text (`query`) or by an existing capture's own embedding (`capture_id`, "find similar," excludes itself from its own results); exactly one of the two is required. Optional filters: exact `source`, `date_from`/`date_to` (inclusive, by calendar day), and `keywords` (`keyword_mode` "and"/"or"). Each result includes `raw_text` and its cosine-similarity `score`. |
+| `list_recent(n=10, source?, date_from?, date_to?, keywords?, keyword_mode="or")` | Most recently captured notes, newest first — optionally narrowed by the same source/date/keyword filters as `search`, with no query text at all. Each result includes `raw_text`. |
 | `stats()` | Total captures, counts by source, first/last capture timestamp. |
 | `delete(id)` | Remove a capture (prune a mis-capture). |
-| `update(id, summary?, keywords?, metadata?)` | Edit a capture. Changing `summary` re-embeds it. `metadata` is a full replace, not a merge. |
+| `update(id, summary?, raw_text?, keywords?, metadata?)` | Edit a capture. Changing `summary` re-embeds it; `raw_text` is reference-only (no re-embed, no dedup effect). `metadata` is a full replace, not a merge. |
 | `find_near_duplicates(threshold=0.95, limit=50)` | Read-only. Lists capture pairs whose summaries are near-duplicates by embedding cosine similarity — catches near-duplicates the exact-fingerprint dedup in `save` misses. Delete one side of a pair via the existing `delete` tool. |
 | `compute_fingerprint(raw_text, source_url?)` | Read-only, no DB access. Shows the SHA-256 dedup fingerprint `save` would compute for this input, plus the normalized string it's based on — for debugging the fingerprint mechanism, not for checking against existing captures. |
 | `cluster_captures(k?)` | Read-only. Groups all captures into thematic clusters by embedding similarity (k-Means). If `k` is omitted, the cluster count is chosen automatically via silhouette score. Returns full cluster membership with a `central` flag marking each cluster's up to 3 most representative entries — cluster *labeling* is left to the calling client. |
@@ -132,7 +132,7 @@ Implemented in [`openbrain-mcp/app/server.py`](openbrain-mcp/app/server.py), del
 | `list_keywords()` | Read-only. Lists every distinct keyword across all captures with its frequency, most-frequent first (aggregated case-insensitively). Powers the OpenBrain GUI's keyword panel. |
 
 All except `save`/`update`'s pass-through of `metadata` are exercised by the test suite
-(`openbrain-mcp/tests/`, 55 tests, mostly run against a real Postgres+pgvector instance;
+(`openbrain-mcp/tests/`, 57 tests, mostly run against a real Postgres+pgvector instance;
 `compute_fingerprint`'s tests are the exception and need no database).
 
 ## Repository layout
@@ -148,7 +148,7 @@ openbrain-mcp/
     store.py            # save/search/recent/stats/delete/update/find_near_duplicates/cluster_captures/classify_captures/list_keywords — the only file with SQL
     server.py             # the 11 MCP tools + bearer auth + /health
   migrations/001_init.sql   # schema
-  tests/                     # 55 tests, pytest
+  tests/                     # 57 tests, pytest
   Dockerfile
   pyproject.toml
 openbrain-gui/                # Phase 1 web GUI — see its own section below
@@ -164,7 +164,7 @@ openbrain-gui/                # Phase 1 web GUI — see its own section below
       delete_log_store.py                 # delete-log insert/list (SQLite)
       routes.py                             # the /api/* FastAPI routes
       main.py                                 # app factory, static frontend mount
-    tests/                                     # 24 tests, pytest
+    tests/                                     # 46 tests, pytest
     pyproject.toml
   frontend/
     src/                                        # React components (Vite, plain JS/JSX, no TS)

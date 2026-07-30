@@ -82,6 +82,32 @@ def test_update_changes_summary_and_reembeds():
         hits = store.search_captures(conn, query="notes about the universe and stars", k=1)
     assert hits and hits[0]["id"] == r["id"]  # re-embedding took effect
 
+def test_search_and_fetch_recent_include_raw_text():
+    _clean()
+    with get_conn() as conn:
+        store.save_capture(conn, raw_text="the full original article text",
+                           summary="a note about compilers", keywords=["compilers"], source="other")
+    with get_conn() as conn:
+        hits = store.search_captures(conn, query="notes about compilers", k=1)
+        recent = store.fetch_recent(conn, n=1)
+    assert hits[0]["raw_text"] == "the full original article text"
+    assert recent[0]["raw_text"] == "the full original article text"
+
+def test_update_changes_raw_text_without_reembedding():
+    _clean()
+    with get_conn() as conn:
+        r = store.save_capture(conn, raw_text="old raw text",
+                               summary="a note about astrophysics",
+                               keywords=["space"], source="other")
+        ok = store.update_capture(conn, capture_id=r["id"], raw_text="new, corrected raw text")
+    assert ok is True
+    with get_conn() as conn:
+        # summary/embedding untouched -> still matches the original query
+        hits = store.search_captures(conn, query="notes about the universe and stars", k=1)
+    assert hits and hits[0]["id"] == r["id"]
+    assert hits[0]["raw_text"] == "new, corrected raw text"
+    assert hits[0]["summary"] == "a note about astrophysics"
+
 def test_find_near_duplicates_detects_similar_but_not_identical_summaries():
     _clean()
     with get_conn() as conn:

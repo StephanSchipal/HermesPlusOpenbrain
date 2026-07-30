@@ -78,12 +78,14 @@ def delete(id: str) -> dict:
         return {"id": id, "deleted": store.delete_capture(conn, capture_id=id)}
 
 @mcp.tool()
-def update(id: str, summary: str | None = None, keywords: list[str] | None = None,
-           metadata: dict | None = None) -> dict:
-    """Edit a capture: change its summary and/or keywords (re-embeds if summary changes)."""
+def update(id: str, summary: str | None = None, raw_text: str | None = None,
+           keywords: list[str] | None = None, metadata: dict | None = None) -> dict:
+    """Edit a capture: change its summary, raw_text, and/or keywords (re-embeds
+    if summary changes; raw_text is reference-only, no re-embed/dedup effect)."""
     with get_conn() as conn:
         return {"id": id, "updated": store.update_capture(
-            conn, capture_id=id, summary=summary, keywords=keywords, metadata=metadata)}
+            conn, capture_id=id, summary=summary, raw_text=raw_text,
+            keywords=keywords, metadata=metadata)}
 
 @mcp.tool()
 def find_near_duplicates(threshold: float = 0.95, limit: int = 50) -> list[dict]:

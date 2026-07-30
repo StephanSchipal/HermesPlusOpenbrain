@@ -76,7 +76,7 @@ Capture-Kanal dient **WhatsApp**, statt Supabase Edge Functions ein
 | `list_recent` | Letzte Einträge |
 | `stats` | Zählungen nach Quelle, Zeitspanne |
 | `delete` | Fehlerhafte Einträge entfernen |
-| `update` | Bearbeiten, re-embedded bei Summary-Änderung |
+| `update` | Bearbeiten (Summary, `raw_text`, Keywords), re-embedded nur bei Summary-Änderung; `raw_text` ist reine Referenz ohne Re-Embedding/Dedup-Effekt |
 | `find_near_duplicates(threshold=0.95, limit=50)` | **Neu (2026-07-20).** Read-only: findet Notizpaare mit sehr ähnlicher Bedeutung per Embedding-Kosinus-Ähnlichkeit — ergänzt den exakten Fingerprint-Dedup aus `save` um Fälle mit unterschiedlicher Formulierung |
 | `compute_fingerprint(raw_text, source_url?)` | **Neu (2026-07-21).** Read-only, kein DB-Zugriff: zeigt den SHA-256-Fingerprint, den `save` für diese Eingabe berechnen würde, plus die normalisierte Zeichenkette dahinter — zum Nachvollziehen/Debuggen des Fingerprint-Mechanismus, kein Duplikat-Check gegen bestehende Einträge |
 | `cluster_captures(k?)` | **Neu (2026-07-21).** Read-only: gruppiert alle Notizen per k-Means nach Embedding-Ähnlichkeit in thematische Cluster — `k` optional, sonst automatisch per Silhouette-Score bestimmt. Gibt volle Cluster-Mitgliedschaft zurück, mit `central`-Flag für die (bis zu) 3 zentralsten Einträge je Cluster; die Themen-*Beschriftung* macht bewusst der aufrufende Client, nicht das Tool selbst |
@@ -490,7 +490,25 @@ Vier Fähigkeiten, die als neue MCP-Tools nach dem bestehenden Muster
    Plan:
    [`docs/superpowers/plans/2026-07-26-openbrain-gui-search-filters.md`](docs/superpowers/plans/2026-07-26-openbrain-gui-search-filters.md).
 
+8. ✅ **Web-GUI — Kurz/Lang-Umschalter für `raw_text`** (`openbrain-gui`) —
+   Hintergrund: Hermes' WhatsApp-Antwort (die ausführliche Zusammenfassung
+   eines geteilten Links) und das in der DB gespeicherte `summary`-Feld
+   waren trotz mehrerer Skill-Anpassungen auf Hermes-Seite konsistent
+   unterschiedlich lang/inhaltlich — Hermes komponiert beim `save`-Aufruf
+   erkennbar zwei unabhängige Texte. Diagnose ergab aber: das bereits
+   vorhandene `raw_text`-Feld enthält zuverlässig die ausführliche Fassung
+   (inhaltlich deckungsgleich mit der WhatsApp-Antwort, nur redaktionell
+   leicht anders formatiert). Statt weiter gegen Hermes' Verhalten
+   anzukämpfen: `search`/`list_recent` liefern jetzt zusätzlich `raw_text`
+   mit; `update` akzeptiert optional `raw_text` (kein Re-Embedding, kein
+   Dedup-Effekt, da der Fingerprint bei vorhandener `source_url` ohnehin
+   darauf basiert, nicht auf `raw_text`). Im Summary-Popup und im
+   Change-Popup je ein "Short/Full"-Umschalter — Short zeigt/bearbeitet
+   `summary` (wie bisher, inkl. Re-Embedding), Full zeigt/bearbeitet
+   `raw_text` (reines Referenzfeld). Gespeichert wird jeweils nur das
+   tatsächlich geänderte Feld.
+
 Damit sind alle 4 ursprünglich geplanten MCP-Fähigkeiten, Phase 1 und Phase 3
-der Web-GUI, sowie deren Suchfilter-Erweiterung umgesetzt und deployed
-(Phase 2 bewusst übersprungen). Details zu jeder einzelnen siehe die
+der Web-GUI, sowie deren Suchfilter- und Kurz/Lang-Erweiterungen umgesetzt und
+deployed (Phase 2 bewusst übersprungen). Details zu jeder einzelnen siehe die
 jeweiligen Spec-/Plan-Dokumente unter `docs/superpowers/`.

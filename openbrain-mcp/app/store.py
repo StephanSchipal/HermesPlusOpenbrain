@@ -92,7 +92,7 @@ def search_captures(conn: psycopg.Connection, *, query: str | None = None,
         # values travel as parameters below -> injection-safe.
         cur.execute(
             f"""
-            SELECT id, summary, keywords, source, source_url, lang, created_at,
+            SELECT id, summary, raw_text, keywords, source, source_url, lang, created_at,
                    1 - (embedding <=> %s::vector) AS score
             FROM captures
             {where_sql}
@@ -294,7 +294,7 @@ def fetch_recent(conn: psycopg.Connection, *, n: int = 10, source: str | None = 
     with conn.cursor() as cur:
         cur.execute(
             f"""
-            SELECT id, summary, keywords, source, source_url, lang, created_at, NULL::float
+            SELECT id, summary, raw_text, keywords, source, source_url, lang, created_at, NULL::float
             FROM captures
             {where_sql}
             ORDER BY created_at DESC
@@ -330,14 +330,21 @@ def delete_capture(conn: psycopg.Connection, *, capture_id: str) -> bool:
     return deleted
 
 def update_capture(conn: psycopg.Connection, *, capture_id: str,
-                   summary: str | None = None, keywords: list[str] | None = None,
+                   summary: str | None = None, raw_text: str | None = None,
+                   keywords: list[str] | None = None,
                    metadata: dict | None = None) -> bool:
-    """Update given fields; re-embed when summary changes; bump updated_at."""
+    """Update given fields; re-embed when summary changes; bump updated_at.
+    raw_text is reference-only (not embedded, doesn't affect the fingerprint
+    since that's keyed on source_url when present) -- changing it never
+    re-embeds or affects dedup."""
     sets: list[str] = []
     params: list = []
     if summary is not None:
         sets += ["summary = %s", "embedding = %s"]
         params += [summary, embed_passage(summary)]
+    if raw_text is not None:
+        sets.append("raw_text = %s")
+        params.append(raw_text)
     if keywords is not None:
         sets.append("keywords = %s")
         params.append(normalize_keywords(keywords))
@@ -359,10 +366,11 @@ def _row_to_result(r) -> dict:
     return {
         "id": str(r[0]),
         "summary": r[1],
-        "keywords": list(r[2] or []),
-        "source": r[3],
-        "source_url": r[4],
-        "lang": r[5],
-        "created_at": r[6].isoformat() if r[6] else None,
-        "score": float(r[7]) if r[7] is not None else None,
+        "raw_text": r[2],
+        "keywords": list(r[3] or []),
+        "source": r[4],
+        "source_url": r[5],
+        "lang": r[6],
+        "created_at": r[7].isoformat() if r[7] else None,
+        "score": float(r[8]) if r[8] is not None else None,
     }

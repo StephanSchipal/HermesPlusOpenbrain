@@ -126,7 +126,9 @@ def test_delete_capture_logs_before_calling_mcp(client, monkeypatch):
 def test_update_capture_proxies_mcp_tool(client, monkeypatch):
     async def fake_call_tool(name, arguments):
         assert name == "update"
-        assert arguments == {"id": "abc", "summary": "new summary", "keywords": ["x"]}
+        assert arguments == {
+            "id": "abc", "summary": "new summary", "raw_text": None, "keywords": ["x"],
+        }
         return _dict_result({"id": "abc", "updated": True})
     monkeypatch.setattr(mcp_client_module, "call_tool", fake_call_tool)
     resp = client.patch("/api/captures/abc", json={"summary": "new summary", "keywords": ["x"]})
@@ -136,10 +138,23 @@ def test_update_capture_proxies_mcp_tool(client, monkeypatch):
 def test_update_capture_keywords_only_skips_subject_line(client, monkeypatch):
     async def fake_call_tool(name, arguments):
         assert name == "update"
-        assert arguments == {"id": "abc", "summary": None, "keywords": ["x"]}
+        assert arguments == {"id": "abc", "summary": None, "raw_text": None, "keywords": ["x"]}
         return _dict_result({"id": "abc", "updated": True})
     monkeypatch.setattr(mcp_client_module, "call_tool", fake_call_tool)
     resp = client.patch("/api/captures/abc", json={"keywords": ["x"]})
+    assert resp.status_code == 200
+    assert resp.json() == {"id": "abc", "updated": True}
+    assert "subject_line" not in resp.json()
+
+def test_update_capture_forwards_raw_text(client, monkeypatch):
+    async def fake_call_tool(name, arguments):
+        assert name == "update"
+        assert arguments == {
+            "id": "abc", "summary": None, "raw_text": "corrected original text", "keywords": None,
+        }
+        return _dict_result({"id": "abc", "updated": True})
+    monkeypatch.setattr(mcp_client_module, "call_tool", fake_call_tool)
+    resp = client.patch("/api/captures/abc", json={"raw_text": "corrected original text"})
     assert resp.status_code == 200
     assert resp.json() == {"id": "abc", "updated": True}
     assert "subject_line" not in resp.json()

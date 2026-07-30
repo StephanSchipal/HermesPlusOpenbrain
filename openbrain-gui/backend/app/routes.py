@@ -26,6 +26,7 @@ class SearchRequest(BaseModel):
 
 class UpdateRequest(BaseModel):
     summary: str | None = None
+    raw_text: str | None = None
     keywords: list[str] | None = None
 
 class PromptRequest(BaseModel):
@@ -133,7 +134,8 @@ async def delete_capture(capture_id: str, snapshot: CaptureSnapshot):
 @router.patch("/captures/{capture_id}")
 async def update_capture(capture_id: str, body: UpdateRequest):
     result = await _call("update", {
-        "id": capture_id, "summary": body.summary, "keywords": body.keywords,
+        "id": capture_id, "summary": body.summary, "raw_text": body.raw_text,
+        "keywords": body.keywords,
     })
     try:
         updated = mcp_client.parse_dict_result(result)
