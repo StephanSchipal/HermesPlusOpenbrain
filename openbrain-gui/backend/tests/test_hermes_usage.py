@@ -426,3 +426,84 @@ def test_config_snapshot_tolerates_a_missing_section(tmp_path):
     (data_dir / "config.yaml").write_text("model:\n  default: claude-sonnet-5\n", encoding="utf-8")
     snap = hermes_usage.config_snapshot(str(data_dir))
     assert snap == {"model.default": "claude-sonnet-5"}
+
+
+def _orphan(hermes_dir):
+    """Simulate Hermes' sessions.auto_prune removing an old session row while
+    its usage row -- real money already spent -- remains."""
+    conn = sqlite3.connect(f"{hermes_dir}/state.db")
+    conn.execute("DELETE FROM sessions WHERE id = 's-cli'")
+    conn.commit()
+    conn.close()
+
+
+def test_summary_still_counts_spend_from_pruned_sessions(hermes_dir):
+    before = hermes_usage.summary(hermes_dir, days=30, now=NOW)["cost_usd"]
+    _orphan(hermes_dir)
+    after = hermes_usage.summary(hermes_dir, days=30, now=NOW)["cost_usd"]
+    assert after == pytest.approx(before)
+    assert after == pytest.approx(34.72)
+
+
+def test_by_model_still_counts_spend_from_pruned_sessions(hermes_dir):
+    _orphan(hermes_dir)
+    rows = {r["model"]: r["cost_usd"] for r in hermes_usage.by_model(hermes_dir, days=30, now=NOW)}
+    assert rows["claude-opus-4-8"] == pytest.approx(16.33)
+
+
+def test_by_platform_groups_pruned_sessions_under_empty_platform(hermes_dir):
+    _orphan(hermes_dir)
+    rows = {r["platform"]: r["cost_usd"] for r in hermes_usage.by_platform(hermes_dir, days=30, now=NOW)}
+    assert rows[""] == pytest.approx(16.33)
+    assert rows["whatsapp"] == pytest.approx(18.39)
+
+
+def test_by_session_keeps_pruned_sessions_with_no_title(hermes_dir):
+    _orphan(hermes_dir)
+    rows = {r["session_id"]: r for r in hermes_usage.by_session(hermes_dir, days=30, now=NOW)}
+    assert rows["s-cli"]["title"] is None
+    assert rows["s-cli"]["cost_usd"] == pytest.approx(16.33)
+
+
+def test_torn_copy_surfaces_as_hermes_data_unavailable(hermes_dir):
+    """A copy racing Hermes' WAL checkpoint can be torn. The module's contract
+    is that this degrades (503), not that it explodes (500)."""
+    with open(f"{hermes_dir}/state.db", "r+b") as fh:
+        fh.seek(0)
+        fh.write(b"this is not a sqlite database")
+    with pytest.raises(hermes_usage.HermesDataUnavailable):
+        hermes_usage.summary(hermes_dir, days=30, now=NOW)
+
+
+def test_config_snapshot_excludes_unlisted_keys_inside_listed_sections(tmp_path):
+    """Whitelisting is per (section, key), not per section -- a secret sitting
+    inside an otherwise-legitimate section must not come through."""
+    data_dir = tmp_path / "hermes-data"
+    data_dir.mkdir()
+    (data_dir / "config.yaml").write_text(
+        "model:\n"
+        "  default: claude-sonnet-5\n"
+        "  api_key: sk-ant-MUST-NOT-LEAK\n"
+        "agent:\n"
+        "  max_turns: 90\n"
+        "  auth_token: tok-MUST-NOT-LEAK\n",
+        encoding="utf-8",
+    )
+    snap = hermes_usage.config_snapshot(str(data_dir))
+    assert snap == {"model.default": "claude-sonnet-5", "agent.max_turns": 90}
+    assert "MUST-NOT-LEAK" not in str(snap)
+
+
+def test_by_session_returns_models_as_a_sorted_list(hermes_dir):
+    conn = sqlite3.connect(f"{hermes_dir}/state.db")
+    conn.execute(
+        "INSERT INTO session_model_usage (session_id, model, task, api_call_count,"
+        " input_tokens, output_tokens, cache_read_tokens, cache_write_tokens,"
+        " reasoning_tokens, estimated_cost_usd, cost_status, first_seen, last_seen)"
+        " VALUES ('s-wa', 'claude-fable-5', 'title_generation', 1, 1, 1, 0, 0,"
+        f" 0, 0.0, 'estimated', {NOW - 2 * DAY}, {NOW - 1 * DAY})"
+    )
+    conn.commit()
+    conn.close()
+    rows = {r["session_id"]: r for r in hermes_usage.by_session(hermes_dir, days=30, now=NOW)}
+    assert rows["s-wa"]["models"] == ["claude-fable-5", "claude-sonnet-5"]

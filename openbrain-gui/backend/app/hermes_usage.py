@@ -16,8 +16,10 @@ are only ever read.
 `state.db-shm` is deliberately NOT copied: it is derived state that SQLite
 rebuilds from the WAL, and a stale copy is worse than none.
 
-A copy taken mid-write can land torn. That is an expected failure, not an
-exception path worth special-casing -- the caller serves the previous snapshot.
+A copy taken mid-write can land torn -- `shutil.copy2` can race Hermes' own
+WAL checkpoint. That is an expected failure: `snapshot()` converts the
+resulting `sqlite3.DatabaseError` into `HermesDataUnavailable`, so callers
+degrade (503) instead of crashing (500).
 """
 import shutil
 import sqlite3
@@ -50,10 +52,23 @@ def snapshot(data_dir: str | None = None) -> Iterator[sqlite3.Connection]:
                 shutil.copy2(wal, dst.with_name("state.db-wal"))
         except OSError as exc:
             raise HermesDataUnavailable(f"could not copy state.db: {exc}") from exc
-        conn = sqlite3.connect(str(dst))
-        conn.row_factory = sqlite3.Row
+        try:
+            conn = sqlite3.connect(str(dst))
+            conn.row_factory = sqlite3.Row
+        except sqlite3.DatabaseError as exc:
+            # sqlite3.connect() is lazy and essentially never fails here in
+            # practice (verified: it opens even a garbage file without error);
+            # the torn-copy failure actually surfaces at query time, below.
+            # This is kept as a second line of defence in case that ever changes.
+            raise HermesDataUnavailable(f"snapshot copy is unreadable: {exc}") from exc
         try:
             yield conn
+        except sqlite3.DatabaseError as exc:
+            # A copy taken mid-checkpoint can be torn. Surface it as the
+            # module's own unavailable-error so callers degrade to 503 rather
+            # than 500 -- this is the "expected failure" the module docstring
+            # means.
+            raise HermesDataUnavailable(f"snapshot copy is unreadable: {exc}") from exc
         finally:
             conn.close()
 
@@ -113,12 +128,17 @@ def _window(days: int, now: float | None) -> tuple[float, float]:
 
 def _grouped(data_dir: str | None, days: int, now: float | None,
              group_sql: str, label: str) -> list[dict]:
+    # LEFT JOIN, not JOIN: a usage row whose session has been pruned still
+    # carries real spend and must not be dropped from the aggregate (same
+    # rationale as `read_usage_rows`). `by_platform` passes
+    # `COALESCE(s.source, '')` so orphaned rows group under '' instead of
+    # vanishing.
     with snapshot(data_dir) as conn:
         rows = conn.execute(
             f"""
             SELECT {group_sql} AS {label}, {_SUM_COLUMNS}
             FROM session_model_usage u
-            JOIN sessions s ON s.id = u.session_id
+            LEFT JOIN sessions s ON s.id = u.session_id
             WHERE u.last_seen >= ? AND u.last_seen <= ?
             GROUP BY {group_sql}
             ORDER BY cost_usd DESC
@@ -135,17 +155,20 @@ def by_model(data_dir: str | None = None, *, days: int = 30,
 
 def by_platform(data_dir: str | None = None, *, days: int = 30,
                 now: float | None = None) -> list[dict]:
-    return _grouped(data_dir, days, now, "s.source", "platform")
+    return _grouped(data_dir, days, now, "COALESCE(s.source, '')", "platform")
 
 
 def summary(data_dir: str | None = None, *, days: int = 30,
             now: float | None = None) -> dict:
+    # No join to `sessions` -- `_SUM_COLUMNS` reads only `u.*`, so a join here
+    # would exist purely to filter out pruned sessions, and their spend is
+    # real money that must not disappear from the total (matches the LEFT
+    # JOIN rationale in `read_usage_rows`).
     with snapshot(data_dir) as conn:
         row = dict(conn.execute(
             f"""
             SELECT {_SUM_COLUMNS}
             FROM session_model_usage u
-            JOIN sessions s ON s.id = u.session_id
             WHERE u.last_seen >= ? AND u.last_seen <= ?
             """,
             _window(days, now),
@@ -171,10 +194,15 @@ def efficiency(data_dir: str | None = None, *, days: int = 30,
     with snapshot(data_dir) as conn:
         rows = conn.execute(
             f"""
-            SELECT s.source AS platform,
+            SELECT COALESCE(s.source, '') AS platform,
                    -- A session has one usage row per (model, task), so joining
                    -- and averaging directly would count a session's messages
                    -- once per row. Average over DISTINCT sessions instead.
+                   --
+                   -- For a pruned session, s.source is NULL, so
+                   -- `s2.source = s.source` matches nothing and this is NULL
+                   -- for that group -- there is no session row left to
+                   -- average, which is honest given the data.
                    (SELECT AVG(s2.message_count)
                       FROM sessions s2
                      WHERE s2.source = s.source
@@ -183,9 +211,9 @@ def efficiency(data_dir: str | None = None, *, days: int = 30,
                    ) AS avg_messages_per_session,
                    {_SUM_COLUMNS}
             FROM session_model_usage u
-            JOIN sessions s ON s.id = u.session_id
+            LEFT JOIN sessions s ON s.id = u.session_id
             WHERE u.last_seen >= ? AND u.last_seen <= ?
-            GROUP BY s.source
+            GROUP BY COALESCE(s.source, '')
             HAVING api_calls > 0
             ORDER BY cost_usd DESC
             """,
@@ -209,6 +237,9 @@ def efficiency(data_dir: str | None = None, *, days: int = 30,
 
 def by_session(data_dir: str | None = None, *, days: int = 30,
                now: float | None = None, limit: int = 50) -> list[dict]:
+    # LEFT JOIN, not JOIN: a pruned session's usage row still carries real
+    # spend. `title`/`platform` are left NULL rather than invented -- the UI
+    # can render "(pruned)".
     with snapshot(data_dir) as conn:
         rows = conn.execute(
             f"""
@@ -218,7 +249,7 @@ def by_session(data_dir: str | None = None, *, days: int = 30,
                    MAX(u.last_seen) AS last_seen,
                    {_SUM_COLUMNS}
             FROM session_model_usage u
-            JOIN sessions s ON s.id = u.session_id
+            LEFT JOIN sessions s ON s.id = u.session_id
             WHERE u.last_seen >= ? AND u.last_seen <= ?
             GROUP BY u.session_id
             ORDER BY cost_usd DESC
@@ -226,7 +257,13 @@ def by_session(data_dir: str | None = None, *, days: int = 30,
             """,
             (*_window(days, now), limit),
         ).fetchall()
-    return [dict(r) for r in rows]
+    # GROUP_CONCAT gives an unordered delimited string; turn it into a
+    # deterministic sorted list rather than leaving callers to parse it.
+    return [
+        {**dict(r),
+         "models": sorted((r["models"] or "").split(",")) if r["models"] else []}
+        for r in rows
+    ]
 
 
 def session_detail(session_id: str, *, data_dir: str | None = None) -> dict | None:
