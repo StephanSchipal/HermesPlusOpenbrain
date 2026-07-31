@@ -304,8 +304,11 @@ def get_cost_summary(days: int = 30):
     flagged = external_costs_store.flagged_row()
     if flagged:
         # An invoice covers a billing month, so this always compares against
-        # the 30-day figure regardless of the selected range.
-        baseline = _hermes(hermes_usage.summary, days=30)["cost_usd"]
+        # the 30-day figure regardless of the selected range. When 30 days is
+        # already what was asked for -- the default, and so the common case --
+        # reuse it rather than copying state.db a second time.
+        baseline = (hermes["cost_usd"] if days == 30
+                    else _hermes(hermes_usage.summary, days=30)["cost_usd"])
         actual = external_costs_store.amounts(flagged, rate)["usd"]
         if actual is not None and baseline:
             comparison = {
