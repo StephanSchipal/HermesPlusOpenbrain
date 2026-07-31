@@ -181,6 +181,7 @@ def summary(data_dir: str | None = None, *, days: int = 30,
     # would exist purely to filter out pruned sessions, and their spend is
     # real money that must not disappear from the total (matches the LEFT
     # JOIN rationale in `read_usage_rows`).
+    window = _window(days, now)
     with _conn_or_snapshot(conn, data_dir) as conn:
         row = dict(conn.execute(
             f"""
@@ -188,8 +189,9 @@ def summary(data_dir: str | None = None, *, days: int = 30,
             FROM session_model_usage u
             WHERE u.last_seen >= ? AND u.last_seen <= ?
             """,
-            _window(days, now),
+            window,
         ).fetchone())
+        unpriced = _unpriced(conn, window)
     for key, value in row.items():
         if value is None:
             row[key] = 0
@@ -199,7 +201,39 @@ def summary(data_dir: str | None = None, *, days: int = 30,
         row["cache_read_tokens"] / denominator if denominator else None
     )
     row["cost_status"] = "estimated"
+    row["unpriced"] = unpriced
     return row
+
+
+def _unpriced(conn: sqlite3.Connection, window: tuple[float, float]) -> dict:
+    """Usage Hermes recorded but could not put a price on.
+
+    Its pricing snapshot has no entry for every model it can talk to, so those
+    rows carry real API calls and tokens at `estimated_cost_usd = 0`. Measured
+    in production: 1.87M tokens across `claude-fable-5` and `moonshotai/kimi-k3`
+    counted as free. Some of that may genuinely be free (a self-hosted model);
+    some is simply unknown. Either way the cost total is a LOWER BOUND, and the
+    page has to say so rather than present it as complete."""
+    row = conn.execute(
+        """
+        SELECT COALESCE(SUM(u.api_call_count), 0) AS api_calls,
+               COALESCE(SUM(COALESCE(u.input_tokens, 0) + COALESCE(u.output_tokens, 0)
+                            + COALESCE(u.cache_read_tokens, 0)
+                            + COALESCE(u.cache_write_tokens, 0)), 0) AS tokens,
+               GROUP_CONCAT(DISTINCT u.model) AS models
+        FROM session_model_usage u
+        WHERE u.last_seen >= ? AND u.last_seen <= ?
+          AND COALESCE(u.estimated_cost_usd, 0) = 0
+          AND COALESCE(u.api_call_count, 0) > 0
+        """,
+        window,
+    ).fetchone()
+    models = row["models"]
+    return {
+        "api_calls": row["api_calls"],
+        "tokens": row["tokens"],
+        "models": sorted(models.split(",")) if models else [],
+    }
 
 
 def efficiency(data_dir: str | None = None, *, days: int = 30,

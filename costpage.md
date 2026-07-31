@@ -87,15 +87,69 @@ A row stores **one** amount plus which currency you typed it in. The other colum
 Type `12.99` into `$` and the row remembers "USD, 12.99" forever — hitting **⟳** later moves the
 `€` figure and never touches your 12.99. Type into `€` instead and it flips.
 
-The rate comes from **frankfurter.app** (European Central Bank daily reference rates — free, no
+The rate comes from **frankfurter.dev** (European Central Bank daily reference rates — free, no
 API key). The box stays editable, so a manual override always works and the network is never a
 hard dependency. A failed refresh keeps the previous rate and says so.
+
+> The service used to live at `frankfurter.app`, which now 301-redirects to `frankfurter.dev/v1`.
+> httpx does not follow redirects by default and treats a 3xx as an error, so the old host broke
+> every refresh with a confusing *"Redirect response '301 Moved Permanently'"*. The default URL now
+> points at the new host and redirects are followed, so a future move degrades rather than breaks.
+
+**The rate is not saved by the External costs Save button.** It lives in its own `fx_rate` table,
+separate from the grid rows, and is written the moment you leave the box or press Enter — the
+`manual, <date>` note beside it is the confirmation. **Save** persists only the spreadsheet rows.
+The two are independent on purpose: changing the rate re-derives every row's converted column, so
+it is not an edit to any particular row.
 
 **If a euro row has no rate yet**, it contributes 0 to the dollar totals. Rather than print a
 confidently wrong number, the page marks the figure with a red `*` and says *"understated — a euro
 row needs an exchange rate"*. Press **⟳** once and it resolves.
 
-### 2.5 Period rules
+### 2.5 Where the money figure actually comes from
+
+Also available in the app: the **?** button on the Total cost of ownership tile opens this same
+explanation. Keep the two in sync — `CostExplainPopup.jsx` mirrors this section.
+
+Nothing on the page is calculated from token counts. The cost is a straight sum of a column
+**Hermes itself writes**:
+
+```
+total_cost_of_ownership_usd = hermes.cost_usd + external.monthly_usd
+
+hermes.cost_usd = SUM(estimated_cost_usd)
+                  FROM session_model_usage
+                  WHERE last_seen falls inside the selected range
+```
+
+Running that SQL directly against `state.db` returns the identical figure the API serves — the
+page adds nothing of its own. Hermes computes `estimated_cost_usd` per (session, model) from a
+pricing table bundled with the agent: `cost_source: official_docs_snapshot`,
+`cost_status: estimated`.
+
+Hermes also has an `actual_cost_usd` column, but never populates it — it reads `0.0` on every row.
+That is precisely why §2.3's invoice comparison exists.
+
+**With no external rows entered, "Total cost of ownership" is just the API estimate.** It only
+becomes a real total once you add the VPS bill and anything else you pay for.
+
+### 2.6 The total is a lower bound
+
+Hermes' pricing table does not cover every model it can talk to. Rows for an unpriced model carry
+real API calls and real tokens at `estimated_cost_usd = 0` — silently counted as free.
+
+Measured on this deployment over 30 days: **17 of 114 rows contributed $0.00**, and three of them
+were not idle — 20 API calls carrying **1.87 million tokens** across `claude-fable-5` and
+`moonshotai/kimi-k3`.
+
+Some of that may genuinely be free (a self-hosted model costs nothing per token). The rest is
+simply unknown. Either way the honest reading is *at least* the figure shown, not exactly it.
+
+The page says so rather than hiding it: when any row in the range is unpriced, the Hermes tile
+shows **≥** before the amount, the total is marked with a red `*`, and the sub-line reports how
+many tokens went unpriced with a link to the full explanation.
+
+### 2.7 Period rules
 
 | Period | Effect |
 |---|---|
@@ -296,6 +350,8 @@ Ledger rows appear once Hermes has been used since that first tick.
 | Every Part 1 panel red, Part 2 fine | Mount missing — check the compose volume |
 | Chart says "Collecting from now" | Normal before the poller has recorded a change |
 | Total marked `*` understated | A euro row has no exchange rate — press **⟳** |
+| Hermes cost shows **≥** | Some usage is unpriced — see §2.6, click through for the models |
+| Rate refresh: `Redirect response '301'` | Old `frankfurter.app` URL. Fixed in the default; check `FRANKFURTER_URL` if overridden |
 | `snapshot copy is unreadable` in logs | A copy raced Hermes' WAL checkpoint. Harmless if occasional; the next tick retries |
 | Cost differs slightly from your invoice | Expected — Hermes estimates from a pricing snapshot (§2.1) |
 

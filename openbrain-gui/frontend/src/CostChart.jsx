@@ -32,13 +32,22 @@ export default function CostChart({ series, group, onGroupChange }) {
   for (const p of series.points) byDay.get(p.day).set(p.group, p.cost_usd || 0)
 
   const dayTotals = days.map((d) => [...byDay.get(d).values()].reduce((a, b) => a + b, 0))
-  const maxTotal = Math.max(...dayTotals, 0.01)
+  const peak = Math.max(...dayTotals, 0.01)
+  // Headroom so the tallest bar doesn't touch the top edge, and so the value
+  // label printed above it has somewhere to sit.
+  const maxTotal = peak * 1.15
 
   const plotW = WIDTH - PAD.left - PAD.right
   const plotH = HEIGHT - PAD.top - PAD.bottom
-  const slot = plotW / days.length
-  const barW = Math.max(2, slot * 0.7)
+  // Cap the slot so a handful of days don't stretch into slabs spanning the
+  // whole plot. Bars then grow leftwards from the axis at a readable width and
+  // the chart looks the same shape on day 1 as on day 30.
+  const slot = Math.min(plotW / days.length, 56)
+  const barW = Math.max(2, Math.min(slot * 0.7, 40))
   const labelEvery = Math.ceil(days.length / 8)
+  // With only a few bars there is room to print the figure above each one --
+  // far more legible than reading it off the axis.
+  const showValues = days.length <= 10
 
   return (
     <section className="cost-table-block">
@@ -57,14 +66,24 @@ export default function CostChart({ series, group, onGroupChange }) {
            aria-label="Daily spend, stacked by group">
         <line x1={PAD.left} y1={PAD.top} x2={PAD.left} y2={PAD.top + plotH} className="axis" />
         <line x1={PAD.left} y1={PAD.top + plotH} x2={PAD.left + plotW} y2={PAD.top + plotH} className="axis" />
-        <text x={PAD.left - 6} y={PAD.top + 8} className="tick" textAnchor="end">{usd(maxTotal)}</text>
+        {/* Sits at the height the peak actually reaches, not at the top of the
+            axis -- the axis carries 15% headroom above it. */}
+        <text x={PAD.left - 6} y={PAD.top + plotH - (peak / maxTotal) * plotH + 4}
+              className="tick" textAnchor="end">{usd(peak)}</text>
         <text x={PAD.left - 6} y={PAD.top + plotH} className="tick" textAnchor="end">$0</text>
 
         {days.map((day, i) => {
           const x = PAD.left + slot * i + (slot - barW) / 2
+          const dayTotal = dayTotals[i]
           let cursor = PAD.top + plotH
           return (
             <g key={day}>
+              {showValues && dayTotal > 0 && (
+                <text x={x + barW / 2} y={PAD.top + plotH - (dayTotal / maxTotal) * plotH - 4}
+                      className="tick" textAnchor="middle">
+                  {usd(dayTotal)}
+                </text>
+              )}
               {groups.map((g, gi) => {
                 const value = byDay.get(day).get(g) || 0
                 if (!value) return null
@@ -94,6 +113,14 @@ export default function CostChart({ series, group, onGroupChange }) {
           </span>
         ))}
       </div>
+
+      {days.length < 3 && (
+        <p className="cost-note">
+          {days.length} day{days.length === 1 ? '' : 's'} recorded so far, since{' '}
+          {series.collecting_since}. Hermes stores only lifetime totals per session, so earlier
+          days cannot be reconstructed — the chart fills out from here.
+        </p>
+      )}
     </section>
   )
 }

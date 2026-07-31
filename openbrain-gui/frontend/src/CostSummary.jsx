@@ -1,6 +1,6 @@
 import { usd, tokens, pct } from './format'
 
-export default function CostSummary({ summary, unavailable }) {
+export default function CostSummary({ summary, unavailable, onExplain }) {
   if (unavailable) {
     return <p className="cost-unavailable">Hermes data is not available — {unavailable}</p>
   }
@@ -9,14 +9,23 @@ export default function CostSummary({ summary, unavailable }) {
   const h = summary.hermes
   const cmp = summary.estimate_vs_actual
   const incomplete = summary.total_cost_of_ownership_incomplete
+  // Hermes prices from a bundled table that does not cover every model it can
+  // talk to, so some rows carry real tokens at zero cost. Say the total is a
+  // lower bound rather than presenting it as complete.
+  const unpriced = h.unpriced || { api_calls: 0, tokens: 0, models: [] }
+  const hasUnpriced = unpriced.api_calls > 0
 
   return (
     <div className="cost-tiles">
       <div className="cost-tile">
-        <span className="cost-tile-label">Total cost of ownership</span>
+        <span className="cost-tile-label">
+          Total cost of ownership
+          <button type="button" className="explain-button" onClick={onExplain}
+                  title="Where do these numbers come from?">?</button>
+        </span>
         <strong>
           {usd(summary.total_cost_of_ownership_usd)}
-          {incomplete && <span className="cost-warning">*</span>}
+          {(incomplete || hasUnpriced) && <span className="cost-warning">*</span>}
         </strong>
         <span className="cost-tile-sub">
           {incomplete
@@ -31,9 +40,16 @@ export default function CostSummary({ summary, unavailable }) {
 
       <div className="cost-tile">
         <span className="cost-tile-label">Hermes API cost <em>estimated</em></span>
-        <strong>{usd(h.cost_usd)}</strong>
+        <strong>
+          {hasUnpriced && <span className="cost-warning" title="lower bound">≥ </span>}
+          {usd(h.cost_usd)}
+        </strong>
         <span className="cost-tile-sub">
-          {cmp
+          {hasUnpriced ? (
+            <button type="button" className="link-button cost-warning" onClick={onExplain}>
+              {tokens(unpriced.tokens)} tokens unpriced — why?
+            </button>
+          ) : cmp
             ? `${cmp.name} invoice ${usd(cmp.actual_usd)} · ${cmp.delta_pct >= 0 ? '+' : ''}${cmp.delta_pct.toFixed(1)}% vs 30d estimate`
             : `${summary.days} days`}
         </span>

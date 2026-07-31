@@ -552,3 +552,33 @@ def test_dashboard_takes_exactly_one_snapshot(hermes_dir, monkeypatch):
 def test_dashboard_propagates_missing_data(tmp_path):
     with pytest.raises(hermes_usage.HermesDataUnavailable):
         hermes_usage.dashboard(str(tmp_path / "nope"), days=30)
+
+
+def test_summary_reports_usage_hermes_could_not_price(hermes_dir):
+    """Hermes' pricing snapshot has no entry for some models, so their rows
+    carry real tokens at estimated_cost_usd = 0. Measured in production: 1.87M
+    tokens across claude-fable-5 and moonshotai/kimi-k3 priced at zero. The
+    total is a lower bound, and the page has to say so rather than present it
+    as complete."""
+    conn = sqlite3.connect(f"{hermes_dir}/state.db")
+    conn.execute(
+        "INSERT INTO session_model_usage (session_id, model, task, api_call_count,"
+        " input_tokens, output_tokens, cache_read_tokens, cache_write_tokens,"
+        " reasoning_tokens, estimated_cost_usd, cost_status, first_seen, last_seen)"
+        " VALUES ('s-wa', 'moonshotai/kimi-k3', '', 20, 1000000, 500, 800000, 0,"
+        f" 0, 0.0, 'unknown', {NOW - 2 * DAY}, {NOW - 1 * DAY})"
+    )
+    conn.commit()
+    conn.close()
+
+    unpriced = hermes_usage.summary(hermes_dir, days=30, now=NOW)["unpriced"]
+    assert unpriced["api_calls"] == 20
+    assert unpriced["tokens"] == 1_800_500
+    assert unpriced["models"] == ["moonshotai/kimi-k3"]
+
+
+def test_summary_reports_nothing_unpriced_when_everything_has_a_price(hermes_dir):
+    unpriced = hermes_usage.summary(hermes_dir, days=30, now=NOW)["unpriced"]
+    assert unpriced["api_calls"] == 0
+    assert unpriced["tokens"] == 0
+    assert unpriced["models"] == []

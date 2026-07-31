@@ -107,17 +107,19 @@ export default function ExternalCostGrid({ onTotalsChange }) {
   }
 
   return (
-    <section className="external-costs">
+    <section className="external-costs cost-divider">
       <div className="external-costs-header">
         <h3>External costs</h3>
         <div className="fx-control">
           <label>
-            Rate $ → €
+            Rate $ → €:{'  '}
             <input
               value={rateInput}
               onChange={(e) => setRateInput(e.target.value)}
               onBlur={handleManualRate}
+              onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur() }}
               size={8}
+              title="Saved as soon as you leave this box or press Enter -- not by the Save button below"
             />
           </label>
           <button onClick={handleRefreshRate} disabled={busy} title="Fetch ECB daily rate">⟳</button>

@@ -50,7 +50,10 @@ def set_manual_rate(usd_to_eur: float, *, path: str | None = None) -> dict:
 
 def refresh_rate(*, path: str | None = None) -> dict:
     try:
-        resp = httpx.get(FRANKFURTER_URL, timeout=FX_TIMEOUT_SECONDS)
+        # follow_redirects: the host has moved once already (.app -> .dev/v1).
+        # Without this a 301 surfaces as a failure rather than a rate.
+        resp = httpx.get(FRANKFURTER_URL, timeout=FX_TIMEOUT_SECONDS,
+                         follow_redirects=True)
         resp.raise_for_status()
         value = resp.json()["rates"]["EUR"]
     except Exception as exc:

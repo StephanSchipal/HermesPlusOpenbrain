@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { api } from './api'
 import CostSummary from './CostSummary'
 import CostChart from './CostChart'
+import CostExplainPopup from './CostExplainPopup'
 import CostTables from './CostTables'
 import CostEfficiency from './CostEfficiency'
 import SessionDetail from './SessionDetail'
@@ -17,6 +18,7 @@ export default function CostView() {
   const [selectedSession, setSelectedSession] = useState(null)
   const [chartGroup, setChartGroup] = useState('model')
   const [series, setSeries] = useState(null)
+  const [explaining, setExplaining] = useState(false)
 
   const load = useCallback(async () => {
     setUnavailable(null)
@@ -45,7 +47,7 @@ export default function CostView() {
 
   return (
     <div className="cost-view">
-      <div className="cost-range">
+      <div className="cost-range cost-divider">
         {RANGES.map((d) => (
           <button key={d} className={days === d ? 'active' : ''} onClick={() => setDays(d)}>
             {d} days
@@ -53,7 +55,12 @@ export default function CostView() {
         ))}
       </div>
 
-      <CostSummary summary={data.summary} unavailable={unavailable} />
+      <CostSummary summary={data.summary} unavailable={unavailable}
+                   onExplain={() => setExplaining(true)} />
+
+      {explaining && data.summary && (
+        <CostExplainPopup summary={data.summary} onClose={() => setExplaining(false)} />
+      )}
 
       <CostChart series={series} group={chartGroup} onGroupChange={setChartGroup} />
 

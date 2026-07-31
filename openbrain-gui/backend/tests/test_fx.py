@@ -33,7 +33,7 @@ def test_refresh_rate_stores_frankfurter_response(tmp_path, monkeypatch):
     db_path = str(tmp_path / "gui.db")
     init_db(db_path)
 
-    def fake_get(url, timeout):
+    def fake_get(url, timeout, **kwargs):
         assert "USD" in url and "EUR" in url
         return httpx.Response(200, json={"rates": {"EUR": 0.8607}}, request=httpx.Request("GET", url))
 
@@ -48,7 +48,7 @@ def test_refresh_rate_keeps_cached_rate_on_network_failure(tmp_path, monkeypatch
     init_db(db_path)
     fx.set_manual_rate(0.90, path=db_path)
 
-    def boom(url, timeout):
+    def boom(url, timeout, **kwargs):
         raise httpx.ConnectError("no network")
 
     monkeypatch.setattr(fx.httpx, "get", boom)
@@ -61,7 +61,7 @@ def test_refresh_rate_rejects_nonsense_payload(tmp_path, monkeypatch):
     db_path = str(tmp_path / "gui.db")
     init_db(db_path)
 
-    def fake_get(url, timeout):
+    def fake_get(url, timeout, **kwargs):
         return httpx.Response(200, json={"rates": {}}, request=httpx.Request("GET", url))
 
     monkeypatch.setattr(fx.httpx, "get", fake_get)
@@ -78,7 +78,7 @@ def test_refresh_rate_rejects_unusable_value_and_keeps_cache(tmp_path, monkeypat
     init_db(db_path)
     fx.set_manual_rate(0.90, path=db_path)
 
-    def fake_get(url, timeout):
+    def fake_get(url, timeout, **kwargs):
         return httpx.Response(200, json={"rates": {"EUR": bad_value}},
                               request=httpx.Request("GET", url))
 
@@ -95,3 +95,31 @@ def test_set_manual_rate_rejects_non_positive(tmp_path, bad_value):
     with pytest.raises(ValueError):
         fx.set_manual_rate(bad_value, path=db_path)
     assert fx.get_rate(path=db_path) is None
+
+
+def test_default_url_targets_the_current_frankfurter_host():
+    """frankfurter.app 301-redirects to frankfurter.dev/v1. httpx does not
+    follow redirects by default and raise_for_status() treats a 3xx as an
+    error, so the old host broke every refresh with a confusing
+    'Redirect response 301 Moved Permanently' message."""
+    from app import config
+
+    assert "frankfurter.dev" in config.FRANKFURTER_URL
+    assert "/v1/" in config.FRANKFURTER_URL
+
+
+def test_refresh_rate_follows_a_redirect(tmp_path, monkeypatch):
+    """Belt and braces: even if the host moves again, a redirect should be
+    followed rather than surfaced as a failure."""
+    db_path = str(tmp_path / "gui.db")
+    init_db(db_path)
+    seen = {}
+
+    def fake_get(url, timeout, follow_redirects=False):
+        seen["follow_redirects"] = follow_redirects
+        return httpx.Response(200, json={"rates": {"EUR": 0.8707}},
+                              request=httpx.Request("GET", url))
+
+    monkeypatch.setattr(fx.httpx, "get", fake_get)
+    assert fx.refresh_rate(path=db_path)["usd_to_eur"] == 0.8707
+    assert seen["follow_redirects"] is True
