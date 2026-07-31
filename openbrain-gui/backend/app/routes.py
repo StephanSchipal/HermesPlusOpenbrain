@@ -9,8 +9,9 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
 from app import mcp_client, prompts_store, delete_log_store, subject_line, graph
-from app import external_costs_store, fx
+from app import external_costs_store, fx, hermes_usage
 from app.mcp_client import OpenBrainMCPError
+from app.hermes_usage import HermesDataUnavailable
 from app.config import DEFAULT_SEARCH_K, DEFAULT_DELETE_LOG_LIMIT, GRAPH_MAX_CAPTURES
 
 router = APIRouter(prefix="/api")
@@ -260,3 +261,67 @@ def put_fx(body: FxRateRequest):
         return {"rate": fx.set_manual_rate(body.usd_to_eur)}
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+def _hermes(fn, *args, **kwargs):
+    """Every state.db-backed endpoint degrades to 503 rather than 500 when the
+    mount is missing or a snapshot copy is unreadable -- the external cost grid
+    must stay usable regardless."""
+    try:
+        return fn(*args, **kwargs)
+    except HermesDataUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+@router.get("/cost/dashboard")
+def get_cost_dashboard(days: int = 30, limit: int = 50):
+    return _hermes(hermes_usage.dashboard, days=days, limit=limit)
+
+@router.get("/cost/session/{session_id}")
+def get_cost_session(session_id: str):
+    detail = _hermes(hermes_usage.session_detail, session_id)
+    if detail is None:
+        raise HTTPException(status_code=404, detail="session not found")
+    return detail
+
+@router.get("/cost/config")
+def get_cost_config():
+    return _hermes(hermes_usage.config_snapshot)
+
+@router.get("/cost/summary")
+def get_cost_summary(days: int = 30):
+    hermes = _hermes(hermes_usage.summary, days=days)
+    rate_row = fx.get_rate()
+    rate = rate_row["usd_to_eur"] if rate_row else None
+    rows = external_costs_store.list_rows()
+    external = external_costs_store.totals(rows, rate)
+
+    total_usd = hermes["cost_usd"] + external["monthly_usd"]
+    # A EUR row with no rate contributes 0 to external["monthly_usd"], so the
+    # combined figure is understated too -- carry the flag rather than let the
+    # UI print a confident wrong number.
+    total_incomplete = external["incomplete"]
+
+    comparison = None
+    flagged = external_costs_store.flagged_row()
+    if flagged:
+        # An invoice covers a billing month, so this always compares against
+        # the 30-day figure regardless of the selected range.
+        baseline = _hermes(hermes_usage.summary, days=30)["cost_usd"]
+        actual = external_costs_store.amounts(flagged, rate)["usd"]
+        if actual is not None and baseline:
+            comparison = {
+                "name": flagged["name"],
+                "estimated_usd": baseline,
+                "actual_usd": actual,
+                "delta_pct": (actual - baseline) / baseline * 100,
+            }
+
+    return {
+        "days": days,
+        "hermes": hermes,
+        "external": external,
+        "rate": rate_row,
+        "total_cost_of_ownership_usd": total_usd,
+        "total_cost_of_ownership_eur": total_usd * rate if rate else None,
+        "total_cost_of_ownership_incomplete": total_incomplete,
+        "estimate_vs_actual": comparison,
+    }

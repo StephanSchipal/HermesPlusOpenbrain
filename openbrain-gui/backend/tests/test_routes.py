@@ -419,3 +419,100 @@ def test_put_handles_a_batch_of_new_and_existing_rows(client):
     assert rows["Hostinger"]["id"] == existing["id"]   # updated in place, not duplicated
     assert rows["Hostinger"]["amount"] == 14.99
     assert rows["Anthropic"]["amount"] == 94.17
+
+
+HERMES_ENDPOINTS = [
+    "/api/cost/summary", "/api/cost/dashboard", "/api/cost/config",
+]
+
+
+@pytest.mark.parametrize("endpoint", HERMES_ENDPOINTS)
+def test_hermes_endpoints_return_503_when_data_dir_absent(client, monkeypatch, tmp_path, endpoint):
+    import app.hermes_usage as hu
+    monkeypatch.setattr(hu, "HERMES_DATA_DIR", str(tmp_path / "not-mounted"))
+    resp = client.get(endpoint)
+    assert resp.status_code == 503
+    assert "not found" in resp.json()["detail"]
+
+
+def test_part2_still_works_when_hermes_data_absent(client, monkeypatch, tmp_path):
+    """The whole point of the 503 design: the external cost grid must not
+    break because the VPS mount is missing."""
+    import app.hermes_usage as hu
+    monkeypatch.setattr(hu, "HERMES_DATA_DIR", str(tmp_path / "not-mounted"))
+    assert client.get("/api/cost/external").status_code == 200
+    assert client.get("/api/cost/fx").status_code == 200
+
+
+def _fake_summary(**over):
+    base = {"sessions": 10, "api_calls": 712, "input_tokens": 1_000,
+            "output_tokens": 500, "cache_read_tokens": 69_000_000,
+            "cache_write_tokens": 8_700_000, "reasoning_tokens": 0,
+            "cost_usd": 94.17, "cache_hit_rate": 0.895, "cost_status": "estimated"}
+    base.update(over)
+    return base
+
+
+def test_summary_combines_hermes_and_external_costs(client, monkeypatch):
+    import app.hermes_usage as hu
+    monkeypatch.setattr(hu, "summary",
+                        lambda data_dir=None, **kw: _fake_summary())
+    client.put("/api/cost/fx", json={"usd_to_eur": 0.80})
+    client.put("/api/cost/external", json={"rows": [
+        {"name": "Hostinger", "period": "monthly", "amount": 12.99,
+         "entered_currency": "USD", "url": None, "comments": None,
+         "compare_to_estimate": False, "sort_order": 0},
+    ]})
+    body = client.get("/api/cost/summary?days=30").json()
+    assert body["hermes"]["cost_usd"] == pytest.approx(94.17)
+    assert body["external"]["monthly_usd"] == pytest.approx(12.99)
+    assert body["total_cost_of_ownership_usd"] == pytest.approx(107.16)
+    assert body["total_cost_of_ownership_eur"] == pytest.approx(85.728)
+    assert body["total_cost_of_ownership_incomplete"] is False
+
+
+def test_summary_marks_the_total_incomplete_when_a_euro_row_lacks_a_rate(client, monkeypatch):
+    """A EUR row contributes 0 to the USD total until a rate exists, so the
+    combined total is understated too -- it must say so."""
+    import app.hermes_usage as hu
+    monkeypatch.setattr(hu, "summary", lambda data_dir=None, **kw: _fake_summary())
+    client.put("/api/cost/external", json={"rows": [
+        {"name": "Euro thing", "period": "monthly", "amount": 10.0,
+         "entered_currency": "EUR", "url": None, "comments": None,
+         "compare_to_estimate": False, "sort_order": 0},
+    ]})
+    body = client.get("/api/cost/summary?days=30").json()
+    assert body["total_cost_of_ownership_incomplete"] is True
+
+
+def test_summary_reports_estimate_vs_actual_when_row_flagged(client, monkeypatch):
+    import app.hermes_usage as hu
+    monkeypatch.setattr(hu, "summary", lambda data_dir=None, **kw: _fake_summary())
+    client.put("/api/cost/external", json={"rows": [
+        {"name": "Anthropic", "period": "monthly", "amount": 91.40,
+         "entered_currency": "USD", "url": None, "comments": None,
+         "compare_to_estimate": True, "sort_order": 0},
+    ]})
+    comparison = client.get("/api/cost/summary?days=7").json()["estimate_vs_actual"]
+    # Always the 30-day estimate regardless of the selected range.
+    assert comparison["estimated_usd"] == pytest.approx(94.17)
+    assert comparison["actual_usd"] == pytest.approx(91.40)
+    assert comparison["delta_pct"] == pytest.approx((91.40 - 94.17) / 94.17 * 100)
+
+
+def test_dashboard_endpoint_returns_all_panels(client, monkeypatch):
+    import app.hermes_usage as hu
+    monkeypatch.setattr(hu, "dashboard", lambda data_dir=None, **kw: {
+        "summary": _fake_summary(), "by_model": [], "by_platform": [],
+        "by_session": [], "efficiency": [], "top_tools": {"tools": [], "token_attribution_available": False},
+        "prompt_budget": [],
+    })
+    body = client.get("/api/cost/dashboard?days=30").json()
+    assert body["summary"]["cost_usd"] == pytest.approx(94.17)
+    assert body["top_tools"]["token_attribution_available"] is False
+
+
+def test_session_detail_404_for_unknown_id(client, monkeypatch):
+    import app.hermes_usage as hu
+    monkeypatch.setattr(hu, "session_detail", lambda sid, *, data_dir=None: None)
+    assert client.get("/api/cost/session/nope").status_code == 404
