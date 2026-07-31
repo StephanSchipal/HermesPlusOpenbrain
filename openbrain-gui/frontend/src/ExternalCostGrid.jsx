@@ -91,6 +91,10 @@ export default function ExternalCostGrid({ onTotalsChange }) {
   }
 
   async function handleManualRate() {
+    // Fires on blur, so tabbing through an untouched box must stay silent --
+    // only complain about something the user actually typed. Before the first
+    // rate is ever fetched the box is legitimately empty.
+    if (rateInput.trim() === '') return
     const value = Number(rateInput)
     if (!value || value <= 0) { setError('Rate must be a positive number'); return }
     if (rate && value === rate.usd_to_eur) return
