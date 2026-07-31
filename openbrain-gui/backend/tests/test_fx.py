@@ -68,3 +68,30 @@ def test_refresh_rate_rejects_nonsense_payload(tmp_path, monkeypatch):
     with pytest.raises(fx.FxUnavailable):
         fx.refresh_rate(path=db_path)
     assert fx.get_rate(path=db_path) is None
+
+
+@pytest.mark.parametrize("bad_value", [-1, 0, "0.86"])
+def test_refresh_rate_rejects_unusable_value_and_keeps_cache(tmp_path, monkeypatch, bad_value):
+    """A well-formed 200 whose EUR value is unusable must be refused by the
+    explicit sanity check, not written to the cache."""
+    db_path = str(tmp_path / "gui.db")
+    init_db(db_path)
+    fx.set_manual_rate(0.90, path=db_path)
+
+    def fake_get(url, timeout):
+        return httpx.Response(200, json={"rates": {"EUR": bad_value}},
+                              request=httpx.Request("GET", url))
+
+    monkeypatch.setattr(fx.httpx, "get", fake_get)
+    with pytest.raises(fx.FxUnavailable):
+        fx.refresh_rate(path=db_path)
+    assert fx.get_rate(path=db_path)["usd_to_eur"] == 0.90
+
+
+@pytest.mark.parametrize("bad_value", [0, -0.5, None])
+def test_set_manual_rate_rejects_non_positive(tmp_path, bad_value):
+    db_path = str(tmp_path / "gui.db")
+    init_db(db_path)
+    with pytest.raises(ValueError):
+        fx.set_manual_rate(bad_value, path=db_path)
+    assert fx.get_rate(path=db_path) is None
