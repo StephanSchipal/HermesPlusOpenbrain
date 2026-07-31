@@ -300,3 +300,66 @@ def test_efficiency_avg_not_skewed_by_duplicate_rows_on_one_of_several_sessions(
     rows = {r["platform"]: r for r in hermes_usage.efficiency(hermes_dir, days=30, now=NOW)}
     assert rows["whatsapp"]["sessions"] == 2
     assert rows["whatsapp"]["avg_messages_per_session"] == pytest.approx((347 + 53) / 2)
+
+
+def test_by_session_returns_titles_and_costs_sorted(hermes_dir):
+    rows = hermes_usage.by_session(hermes_dir, days=30, now=NOW)
+    assert [r["title"] for r in rows] == ["Context Engineering", "Twilio Voice"]
+    assert rows[0]["platform"] == "whatsapp"
+    assert rows[0]["cost_usd"] == pytest.approx(18.39)
+    assert rows[0]["message_count"] == 347
+
+
+def test_by_session_respects_limit(hermes_dir):
+    rows = hermes_usage.by_session(hermes_dir, days=30, now=NOW, limit=1)
+    assert len(rows) == 1
+    assert rows[0]["title"] == "Context Engineering"
+
+
+def test_session_detail_includes_prompt_and_compression_state(hermes_dir):
+    detail = hermes_usage.session_detail("s-cli", data_dir=hermes_dir)
+    assert detail["title"] == "Twilio Voice"
+    assert detail["platform"] == "cli"
+    assert detail["cwd"] == "/root/proj"
+    assert detail["git_branch"] == "main"
+    assert detail["compression_fallback_streak"] == 2
+    assert detail["compression_failure_error"] == "boom"
+    assert detail["system_prompt_chars"] == 17000
+    assert detail["system_prompt"].startswith("yyy")
+    assert len(detail["models"]) == 1
+    assert detail["models"][0]["model"] == "claude-opus-4-8"
+
+
+def test_session_detail_unknown_id_returns_none(hermes_dir):
+    assert hermes_usage.session_detail("nope", data_dir=hermes_dir) is None
+
+
+def test_session_detail_handles_null_system_prompt(hermes_dir):
+    """sessions.system_prompt is NULL for 24 of 137 rows in the live database."""
+    conn = sqlite3.connect(f"{hermes_dir}/state.db")
+    conn.execute("UPDATE sessions SET system_prompt = NULL WHERE id = 's-cli'")
+    conn.commit()
+    conn.close()
+    detail = hermes_usage.session_detail("s-cli", data_dir=hermes_dir)
+    assert detail["system_prompt_chars"] == 0
+    assert detail["system_prompt"] is None
+
+
+def test_by_session_sums_across_multiple_usage_rows(hermes_dir):
+    """A session gets one usage row per (model, task). The top-spender list
+    must show what the SESSION cost, not what one of its rows cost."""
+    conn = sqlite3.connect(f"{hermes_dir}/state.db")
+    conn.execute(
+        "INSERT INTO session_model_usage (session_id, model, task, api_call_count,"
+        " input_tokens, output_tokens, cache_read_tokens, cache_write_tokens,"
+        " reasoning_tokens, estimated_cost_usd, cost_status, first_seen, last_seen)"
+        " VALUES ('s-cli', 'claude-fable-5', 'title_generation', 1, 10, 5, 0, 0,"
+        f" 0, 5.00, 'estimated', {NOW - 3 * DAY}, {NOW - 2 * DAY})"
+    )
+    conn.commit()
+    conn.close()
+    rows = {r["title"]: r for r in hermes_usage.by_session(hermes_dir, days=30, now=NOW)}
+    cli = rows["Twilio Voice"]
+    assert cli["cost_usd"] == pytest.approx(21.33)   # 16.33 + 5.00
+    assert cli["api_calls"] == 185                   # 184 + 1
+    assert cli["sessions"] == 1

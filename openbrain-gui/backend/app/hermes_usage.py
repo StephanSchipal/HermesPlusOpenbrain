@@ -203,3 +203,61 @@ def efficiency(data_dir: str | None = None, *, days: int = 30,
         row["cost_per_call"] = row["cost_usd"] / calls if calls else None
         result.append(row)
     return result
+
+
+def by_session(data_dir: str | None = None, *, days: int = 30,
+               now: float | None = None, limit: int = 50) -> list[dict]:
+    with snapshot(data_dir) as conn:
+        rows = conn.execute(
+            f"""
+            SELECT u.session_id, s.title, s.source AS platform,
+                   s.message_count, s.tool_call_count,
+                   GROUP_CONCAT(DISTINCT u.model) AS models,
+                   MAX(u.last_seen) AS last_seen,
+                   {_SUM_COLUMNS}
+            FROM session_model_usage u
+            JOIN sessions s ON s.id = u.session_id
+            WHERE u.last_seen >= ? AND u.last_seen <= ?
+            GROUP BY u.session_id
+            ORDER BY cost_usd DESC
+            LIMIT ?
+            """,
+            (*_window(days, now), limit),
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def session_detail(session_id: str, *, data_dir: str | None = None) -> dict | None:
+    with snapshot(data_dir) as conn:
+        session = conn.execute(
+            """
+            SELECT id, title, source AS platform, model, message_count,
+                   tool_call_count, cwd, git_branch, profile_name, system_prompt,
+                   compression_fallback_streak, compression_failure_error,
+                   compression_failure_cooldown_until
+            FROM sessions WHERE id = ?
+            """,
+            (session_id,),
+        ).fetchone()
+        if session is None:
+            return None
+        models = conn.execute(
+            """
+            SELECT model, COALESCE(task, '') AS task,
+                   COALESCE(api_call_count, 0)     AS api_calls,
+                   COALESCE(input_tokens, 0)       AS input_tokens,
+                   COALESCE(output_tokens, 0)      AS output_tokens,
+                   COALESCE(cache_read_tokens, 0)  AS cache_read_tokens,
+                   COALESCE(cache_write_tokens, 0) AS cache_write_tokens,
+                   COALESCE(estimated_cost_usd, 0) AS cost_usd,
+                   first_seen, last_seen
+            FROM session_model_usage WHERE session_id = ?
+            ORDER BY cost_usd DESC
+            """,
+            (session_id,),
+        ).fetchall()
+
+    detail = dict(session)
+    detail["system_prompt_chars"] = len(detail.get("system_prompt") or "")
+    detail["models"] = [dict(m) for m in models]
+    return detail
