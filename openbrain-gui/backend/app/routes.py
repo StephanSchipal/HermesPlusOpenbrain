@@ -9,6 +9,7 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
 from app import mcp_client, prompts_store, delete_log_store, subject_line, graph
+from app import external_costs_store, fx
 from app.mcp_client import OpenBrainMCPError
 from app.config import DEFAULT_SEARCH_K, DEFAULT_DELETE_LOG_LIMIT, GRAPH_MAX_CAPTURES
 
@@ -37,6 +38,23 @@ class CaptureSnapshot(BaseModel):
     keywords: list[str] = []
     source_url: str | None = None
     created_at: str | None = None
+
+class ExternalCostRow(BaseModel):
+    id: int | None = None
+    name: str = ""
+    period: Literal["yearly", "monthly", "onetime", "none"] = "monthly"
+    amount: float | None = None
+    entered_currency: Literal["USD", "EUR"] = "USD"
+    url: str | None = None
+    comments: str | None = None
+    compare_to_estimate: bool = False
+    sort_order: int = 0
+
+class ExternalCostSaveRequest(BaseModel):
+    rows: list[ExternalCostRow]
+
+class FxRateRequest(BaseModel):
+    usd_to_eur: float
 
 async def _call(name: str, arguments: dict):
     try:
@@ -189,3 +207,52 @@ async def get_graph(k: int | None = Query(default=None, ge=1)):
         return {"error": "not_enough_captures", "count": len(captures)}
 
     return graph.build_keyword_graph(captures, cluster_data["clusters"])
+
+@router.get("/cost/external")
+def get_external_costs():
+    rate_row = fx.get_rate()
+    rate = rate_row["usd_to_eur"] if rate_row else None
+    rows = external_costs_store.list_rows()
+    for row in rows:
+        row.update(external_costs_store.amounts(row, rate))
+    return {
+        "rows": rows,
+        "totals": external_costs_store.totals(rows, rate),
+        "rate": rate_row,
+    }
+
+@router.put("/cost/external")
+def put_external_costs(body: ExternalCostSaveRequest):
+    payload = [r.model_dump() for r in body.rows]
+    for row in payload:
+        row["compare_to_estimate"] = int(row["compare_to_estimate"])
+    try:
+        external_costs_store.save_rows(payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return get_external_costs()
+
+@router.delete("/cost/external/{row_id}")
+def delete_external_cost(row_id: int):
+    if not external_costs_store.delete_row(row_id):
+        raise HTTPException(status_code=404, detail="row not found")
+    return {"id": row_id, "deleted": True}
+
+@router.get("/cost/fx")
+def get_fx():
+    return {"rate": fx.get_rate()}
+
+@router.post("/cost/fx/refresh")
+def post_fx_refresh():
+    try:
+        return {"rate": fx.refresh_rate()}
+    except fx.FxUnavailable as exc:
+        # 503, not 500: the cached rate is still valid and the UI keeps working.
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+@router.put("/cost/fx")
+def put_fx(body: FxRateRequest):
+    try:
+        return {"rate": fx.set_manual_rate(body.usd_to_eur)}
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc

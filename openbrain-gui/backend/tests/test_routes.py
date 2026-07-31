@@ -307,3 +307,81 @@ def test_get_recent_mcp_failure_returns_502(client, monkeypatch):
     monkeypatch.setattr(mcp_client_module, "call_tool", fake_call_tool)
     resp = client.get("/api/recent")
     assert resp.status_code == 502
+
+def test_external_costs_round_trip(client):
+    resp = client.put("/api/cost/external", json={"rows": [
+        {"name": "Hostinger", "period": "monthly", "amount": 12.99,
+         "entered_currency": "USD", "url": "https://hpanel.hostinger.com",
+         "comments": "KVM2", "compare_to_estimate": False, "sort_order": 0},
+    ]})
+    assert resp.status_code == 200
+    listed = client.get("/api/cost/external").json()
+    assert len(listed["rows"]) == 1
+    assert listed["rows"][0]["name"] == "Hostinger"
+    assert listed["totals"]["onetime_usd"] == 0.0
+    assert listed["totals"]["incomplete"] is False
+
+
+def test_external_totals_report_incomplete_without_a_rate(client):
+    """A EUR row contributes 0 to the USD total until a rate exists. The API
+    must say so -- see external_costs_store.totals."""
+    client.put("/api/cost/external", json={"rows": [
+        {"name": "Euro thing", "period": "monthly", "amount": 10.0,
+         "entered_currency": "EUR", "url": None, "comments": None,
+         "compare_to_estimate": False, "sort_order": 0},
+    ]})
+    totals = client.get("/api/cost/external").json()["totals"]
+    assert totals["incomplete"] is True
+    assert totals["monthly_usd"] == pytest.approx(0.0)
+
+
+def test_external_costs_reject_bad_url(client):
+    resp = client.put("/api/cost/external", json={"rows": [
+        {"name": "bad", "period": "monthly", "amount": 1.0, "entered_currency": "USD",
+         "url": "javascript:alert(1)", "comments": None,
+         "compare_to_estimate": False, "sort_order": 0},
+    ]})
+    assert resp.status_code == 400
+    assert "http" in resp.json()["detail"]
+
+
+def test_delete_external_cost_row(client):
+    client.put("/api/cost/external", json={"rows": [
+        {"name": "Gone", "period": "none", "amount": None, "entered_currency": "USD",
+         "url": None, "comments": None, "compare_to_estimate": False, "sort_order": 0},
+    ]})
+    row_id = client.get("/api/cost/external").json()["rows"][0]["id"]
+    assert client.delete(f"/api/cost/external/{row_id}").status_code == 200
+    assert client.get("/api/cost/external").json()["rows"] == []
+    assert client.delete(f"/api/cost/external/{row_id}").status_code == 404
+
+
+def test_fx_manual_override_then_read(client):
+    assert client.get("/api/cost/fx").json()["rate"] is None
+    resp = client.put("/api/cost/fx", json={"usd_to_eur": 0.8607})
+    assert resp.status_code == 200
+    assert client.get("/api/cost/fx").json()["rate"]["usd_to_eur"] == 0.8607
+
+
+def test_fx_refresh_failure_returns_503_and_keeps_rate(client, monkeypatch):
+    import app.fx as fx_module
+    client.put("/api/cost/fx", json={"usd_to_eur": 0.90})
+
+    def boom(*, path=None):
+        raise fx_module.FxUnavailable("no network")
+
+    monkeypatch.setattr(fx_module, "refresh_rate", boom)
+    assert client.post("/api/cost/fx/refresh").status_code == 503
+    assert client.get("/api/cost/fx").json()["rate"]["usd_to_eur"] == 0.90
+
+
+def test_external_totals_use_current_rate(client):
+    client.put("/api/cost/fx", json={"usd_to_eur": 0.80})
+    client.put("/api/cost/external", json={"rows": [
+        {"name": "Yearly thing", "period": "yearly", "amount": 120.0,
+         "entered_currency": "USD", "url": None, "comments": None,
+         "compare_to_estimate": False, "sort_order": 0},
+    ]})
+    totals = client.get("/api/cost/external").json()["totals"]
+    assert totals["monthly_usd"] == pytest.approx(10.0)
+    assert totals["monthly_eur"] == pytest.approx(8.0)
