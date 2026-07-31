@@ -9,7 +9,7 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
 from app import mcp_client, prompts_store, delete_log_store, subject_line, graph
-from app import external_costs_store, fx, hermes_usage
+from app import external_costs_store, fx, hermes_usage, ledger_store
 from app.mcp_client import OpenBrainMCPError
 from app.hermes_usage import HermesDataUnavailable
 from app.config import DEFAULT_SEARCH_K, DEFAULT_DELETE_LOG_LIMIT, GRAPH_MAX_CAPTURES
@@ -285,6 +285,17 @@ def get_cost_session(session_id: str):
 @router.get("/cost/config")
 def get_cost_config():
     return _hermes(hermes_usage.config_snapshot)
+
+@router.get("/cost/timeseries")
+def get_cost_timeseries(days: int = 30, group: str = "model"):
+    # Reads gui.db, not state.db -- deliberately no _hermes() wrapper, so the
+    # chart survives the mount being absent. `group` is annotated `str` rather
+    # than Literal so a bad value gives a 400 with a plain `detail`, matching
+    # every other /api/cost/* validation failure instead of FastAPI's 422.
+    try:
+        return ledger_store.timeseries(days=days, group=group)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 @router.get("/cost/summary")
 def get_cost_summary(days: int = 30):

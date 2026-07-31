@@ -48,4 +48,5 @@ export const api = {
   getCostSummary: (days) => request(`/cost/summary?days=${days}`),
   getCostSession: (id) => request(`/cost/session/${encodeURIComponent(id)}`),
   getCostConfig: () => request('/cost/config'),
+  getCostTimeseries: (days, group) => request(`/cost/timeseries?days=${days}&group=${group}`),
 }

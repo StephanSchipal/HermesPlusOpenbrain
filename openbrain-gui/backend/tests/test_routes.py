@@ -516,3 +516,38 @@ def test_session_detail_404_for_unknown_id(client, monkeypatch):
     import app.hermes_usage as hu
     monkeypatch.setattr(hu, "session_detail", lambda sid, *, data_dir=None: None)
     assert client.get("/api/cost/session/nope").status_code == 404
+
+
+def _ledger_row(**over):
+    row = {"session_id": "s1", "model": "claude-sonnet-5", "task": "",
+           "platform": "cli", "api_call_count": 1, "input_tokens": 1,
+           "output_tokens": 1, "cache_read_tokens": 1, "cache_write_tokens": 1,
+           "reasoning_tokens": 0, "estimated_cost_usd": 1.0}
+    row.update(over)
+    return row
+
+
+def test_timeseries_endpoint_returns_points_and_collecting_since(client):
+    from app import ledger_store
+    ledger_store.apply_tick([_ledger_row()], observed_at="2026-08-01T00:00:00+00:00")
+    ledger_store.apply_tick([_ledger_row(api_call_count=5, estimated_cost_usd=3.0)],
+                            observed_at="2026-08-01T06:00:00+00:00")
+    body = client.get("/api/cost/timeseries?days=3650&group=model").json()
+    assert body["collecting_since"] == "2026-08-01"
+    assert body["points"][0]["group"] == "claude-sonnet-5"
+    assert body["points"][0]["cost_usd"] == pytest.approx(2.0)
+
+
+def test_timeseries_rejects_bad_group(client):
+    resp = client.get("/api/cost/timeseries?group=banana")
+    assert resp.status_code == 400
+    assert "group must be" in resp.json()["detail"]
+
+
+def test_timeseries_works_without_hermes_data(client, monkeypatch, tmp_path):
+    """The ledger lives in gui.db, so this endpoint never needs the mount --
+    the chart keeps working even when every other Hermes panel is 503."""
+    import app.hermes_usage as hu
+    monkeypatch.setattr(hu, "HERMES_DATA_DIR", str(tmp_path / "not-mounted"))
+    assert client.get("/api/cost/dashboard").status_code == 503
+    assert client.get("/api/cost/timeseries?days=30&group=model").status_code == 200

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { api } from './api'
 import CostSummary from './CostSummary'
+import CostChart from './CostChart'
 import CostTables from './CostTables'
 import CostEfficiency from './CostEfficiency'
 import SessionDetail from './SessionDetail'
@@ -14,6 +15,8 @@ export default function CostView() {
   const [data, setData] = useState({})
   const [unavailable, setUnavailable] = useState(null)
   const [selectedSession, setSelectedSession] = useState(null)
+  const [chartGroup, setChartGroup] = useState('model')
+  const [series, setSeries] = useState(null)
 
   const load = useCallback(async () => {
     setUnavailable(null)
@@ -34,6 +37,12 @@ export default function CostView() {
 
   useEffect(() => { load() }, [load])
 
+  // The ledger lives in gui.db, so the chart loads independently of the Hermes
+  // mount -- it keeps working even when every other panel is 503.
+  useEffect(() => {
+    api.getCostTimeseries(days, chartGroup).then(setSeries).catch(() => setSeries(null))
+  }, [days, chartGroup])
+
   return (
     <div className="cost-view">
       <div className="cost-range">
@@ -45,6 +54,8 @@ export default function CostView() {
       </div>
 
       <CostSummary summary={data.summary} unavailable={unavailable} />
+
+      <CostChart series={series} group={chartGroup} onGroupChange={setChartGroup} />
 
       {!unavailable && data.summary && (
         <>
