@@ -10,6 +10,7 @@ import ChangePopup from './ChangePopup.jsx'
 import SummaryPopup from './SummaryPopup.jsx'
 import KeywordGraph from './KeywordGraph.jsx'
 import FilterBar from './FilterBar.jsx'
+import CostView from './CostView'
 
 const SEARCH_PAGE_SIZE = 25
 
@@ -288,12 +289,17 @@ export default function App() {
         <button onClick={() => setView((v) => (v === 'graph' ? 'results' : 'graph'))}>
           {view === 'graph' ? 'Back to results' : 'Show keyword graph'}
         </button>
+        <button onClick={() => setView((v) => (v === 'cost' ? 'results' : 'cost'))}>
+          {view === 'cost' ? 'Back to results' : 'Cost'}
+        </button>
       </div>
 
       {view === 'deleteLog' ? (
         <DeleteLogView />
       ) : view === 'graph' ? (
         <KeywordGraph onKeywordClick={handleKeywordClick} />
+      ) : view === 'cost' ? (
+        <CostView />
       ) : searching ? (
         <p className="grid-empty">Searching…</p>
       ) : (

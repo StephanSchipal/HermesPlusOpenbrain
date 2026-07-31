@@ -189,3 +189,21 @@ button { cursor: pointer; }
   align-self: center; background: none; color: var(--fg); border: 1px solid var(--border);
   border-radius: 4px; padding: 4px 8px; font-size: 12px;
 }
+
+.cost-view { display: flex; flex-direction: column; gap: 1rem; }
+.cost-range { display: flex; gap: 0.5rem; }
+.cost-range button.active { font-weight: 600; text-decoration: underline; }
+.cost-external-total { margin: 0; opacity: 0.85; }
+.cost-warning { color: #c0392b; }
+
+.external-costs-header { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
+.fx-control { display: flex; align-items: center; gap: 0.5rem; }
+.fx-meta { opacity: 0.7; font-size: 0.85em; }
+.external-costs-error { color: #c0392b; margin: 0.25rem 0; }
+
+.external-costs-table { width: 100%; border-collapse: collapse; }
+.external-costs-table th, .external-costs-table td { padding: 0.25rem 0.4rem; text-align: left; }
+.external-costs-table input[type="text"], .external-costs-table input:not([type]) { width: 100%; }
+.external-costs-table input.num { width: 6rem; text-align: right; }
+.external-costs-table tr.selected { background: rgba(127, 127, 127, 0.15); }
+.external-costs-actions { display: flex; gap: 0.5rem; }
