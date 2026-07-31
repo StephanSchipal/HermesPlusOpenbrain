@@ -22,6 +22,7 @@ exception path worth special-casing -- the caller serves the previous snapshot.
 import shutil
 import sqlite3
 import tempfile
+import time
 from contextlib import contextmanager
 from collections.abc import Iterator
 from pathlib import Path
@@ -81,3 +82,114 @@ def read_usage_rows(data_dir: str | None = None) -> list[dict]:
             """
         ).fetchall()
     return [dict(r) for r in rows]
+
+
+# A session's usage row spans its whole life, so it cannot be split across days.
+# The window rule is: include the row when `last_seen` falls inside it, and
+# count the whole row. Exact totals, slightly late attribution -- proportional
+# splitting would invent numbers the source does not contain.
+_SUM_COLUMNS = """
+    COUNT(DISTINCT u.session_id)               AS sessions,
+    SUM(COALESCE(u.api_call_count, 0))         AS api_calls,
+    SUM(COALESCE(u.input_tokens, 0))           AS input_tokens,
+    SUM(COALESCE(u.output_tokens, 0))          AS output_tokens,
+    SUM(COALESCE(u.cache_read_tokens, 0))      AS cache_read_tokens,
+    SUM(COALESCE(u.cache_write_tokens, 0))     AS cache_write_tokens,
+    SUM(COALESCE(u.reasoning_tokens, 0))       AS reasoning_tokens,
+    SUM(COALESCE(u.estimated_cost_usd, 0))     AS cost_usd
+"""
+
+
+def _window(days: int, now: float | None) -> tuple[float, float]:
+    """The window is `[now - days, now]`, not just `>= cutoff` -- a lower
+    bound alone would let rows leak in whenever `now` is set earlier than the
+    data (e.g. probing an empty window in the past), since their real
+    `last_seen` values still satisfy `>= cutoff`."""
+    effective_now = now if now is not None else time.time()
+    return effective_now - days * 86400.0, effective_now
+
+
+def _grouped(data_dir: str | None, days: int, now: float | None,
+             group_sql: str, label: str) -> list[dict]:
+    with snapshot(data_dir) as conn:
+        rows = conn.execute(
+            f"""
+            SELECT {group_sql} AS {label}, {_SUM_COLUMNS}
+            FROM session_model_usage u
+            JOIN sessions s ON s.id = u.session_id
+            WHERE u.last_seen >= ? AND u.last_seen <= ?
+            GROUP BY {group_sql}
+            ORDER BY cost_usd DESC
+            """,
+            _window(days, now),
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def by_model(data_dir: str | None = None, *, days: int = 30,
+             now: float | None = None) -> list[dict]:
+    return _grouped(data_dir, days, now, "u.model", "model")
+
+
+def by_platform(data_dir: str | None = None, *, days: int = 30,
+                now: float | None = None) -> list[dict]:
+    return _grouped(data_dir, days, now, "s.source", "platform")
+
+
+def summary(data_dir: str | None = None, *, days: int = 30,
+            now: float | None = None) -> dict:
+    with snapshot(data_dir) as conn:
+        row = dict(conn.execute(
+            f"""
+            SELECT {_SUM_COLUMNS}
+            FROM session_model_usage u
+            JOIN sessions s ON s.id = u.session_id
+            WHERE u.last_seen >= ? AND u.last_seen <= ?
+            """,
+            _window(days, now),
+        ).fetchone())
+    for key, value in row.items():
+        if value is None:
+            row[key] = 0
+    denominator = (row["cache_read_tokens"] + row["cache_write_tokens"]
+                   + row["input_tokens"])
+    row["cache_hit_rate"] = (
+        row["cache_read_tokens"] / denominator if denominator else None
+    )
+    row["cost_status"] = "estimated"
+    return row
+
+
+def efficiency(data_dir: str | None = None, *, days: int = 30,
+               now: float | None = None) -> list[dict]:
+    """Per-platform per-call averages. Prompt size times call count is what
+    drives the bill, and cache WRITE volume per call is where the money
+    actually goes -- a write costs 12.5x a read."""
+    with snapshot(data_dir) as conn:
+        rows = conn.execute(
+            f"""
+            SELECT s.source AS platform, AVG(s.message_count) AS avg_messages_per_session,
+                   {_SUM_COLUMNS}
+            FROM session_model_usage u
+            JOIN sessions s ON s.id = u.session_id
+            WHERE u.last_seen >= ? AND u.last_seen <= ?
+            GROUP BY s.source
+            HAVING api_calls > 0
+            ORDER BY cost_usd DESC
+            """,
+            _window(days, now),
+        ).fetchall()
+
+    result = []
+    for raw in rows:
+        row = dict(raw)
+        calls = row["api_calls"]
+        total_tokens = (row["input_tokens"] + row["output_tokens"]
+                        + row["cache_read_tokens"] + row["cache_write_tokens"])
+        # `HAVING api_calls > 0` already excludes the divide-by-zero case;
+        # the guard keeps that true if the HAVING clause is ever relaxed.
+        row["tokens_per_call"] = total_tokens / calls if calls else None
+        row["cache_write_per_call"] = row["cache_write_tokens"] / calls if calls else None
+        row["cost_per_call"] = row["cost_usd"] / calls if calls else None
+        result.append(row)
+    return result

@@ -163,3 +163,76 @@ def test_read_usage_rows_keeps_orphaned_usage(hermes_dir):
     orphan = next(r for r in rows if r["session_id"] == "s-old")
     assert orphan["platform"] == ""
     assert orphan["estimated_cost_usd"] == 0.42
+
+
+def test_window_uses_epoch_floats_not_iso_strings(hermes_dir):
+    """The regression this guards: comparing last_seen against
+    datetime('now','-30 days') matches nothing and returns an empty report
+    that looks like 'no activity' rather than an error."""
+    recent = hermes_usage.by_model(hermes_dir, days=30, now=NOW)
+    assert {r["model"] for r in recent} == {"claude-sonnet-5", "claude-opus-4-8"}
+    everything = hermes_usage.by_model(hermes_dir, days=365, now=NOW)
+    assert "claude-sonnet-4-6" in {r["model"] for r in everything}
+
+
+def test_by_model_aggregates_counters_and_cost(hermes_dir):
+    rows = {r["model"]: r for r in hermes_usage.by_model(hermes_dir, days=30, now=NOW)}
+    wa = rows["claude-sonnet-5"]
+    assert wa["sessions"] == 1
+    assert wa["api_calls"] == 193
+    assert wa["cache_read_tokens"] == 30_000_000
+    assert wa["cache_write_tokens"] == 4_000_000
+    assert wa["cost_usd"] == pytest.approx(18.39)
+
+
+def test_by_model_sorted_by_cost_descending(hermes_dir):
+    rows = hermes_usage.by_model(hermes_dir, days=30, now=NOW)
+    assert [r["cost_usd"] for r in rows] == sorted(
+        [r["cost_usd"] for r in rows], reverse=True
+    )
+
+
+def test_by_platform_joins_sessions_source(hermes_dir):
+    rows = {r["platform"]: r for r in hermes_usage.by_platform(hermes_dir, days=30, now=NOW)}
+    assert set(rows) == {"whatsapp", "cli"}
+    assert rows["whatsapp"]["cost_usd"] == pytest.approx(18.39)
+    assert rows["cli"]["api_calls"] == 184
+
+
+def test_summary_computes_cache_hit_rate(hermes_dir):
+    summary = hermes_usage.summary(hermes_dir, days=30, now=NOW)
+    reads = 42_000_000
+    writes = 4_900_000
+    inputs = 150_000
+    assert summary["cache_read_tokens"] == reads
+    assert summary["cache_hit_rate"] == pytest.approx(reads / (reads + writes + inputs))
+    assert summary["cost_usd"] == pytest.approx(34.72)
+    assert summary["api_calls"] == 377
+
+
+def test_summary_on_empty_window_does_not_divide_by_zero(hermes_dir):
+    summary = hermes_usage.summary(hermes_dir, days=1, now=NOW - 5000 * DAY)
+    assert summary["api_calls"] == 0
+    assert summary["cache_hit_rate"] is None
+
+
+def test_efficiency_per_platform(hermes_dir):
+    """The numbers that actually move the bill. WhatsApp writes far more cache
+    per call than CLI, which is the whole reason this panel exists."""
+    rows = {r["platform"]: r for r in hermes_usage.efficiency(hermes_dir, days=30, now=NOW)}
+    wa = rows["whatsapp"]
+    assert wa["api_calls"] == 193
+    # (100_000 + 20_000 + 30_000_000 + 4_000_000) / 193
+    assert wa["tokens_per_call"] == pytest.approx(34_120_000 / 193)
+    assert wa["cache_write_per_call"] == pytest.approx(4_000_000 / 193)
+    assert wa["cost_per_call"] == pytest.approx(18.39 / 193)
+    assert wa["avg_messages_per_session"] == pytest.approx(347)
+
+    cli = rows["cli"]
+    assert cli["cache_write_per_call"] == pytest.approx(900_000 / 184)
+    assert wa["cache_write_per_call"] > cli["cache_write_per_call"]
+
+
+def test_efficiency_with_zero_calls_does_not_divide_by_zero(hermes_dir):
+    rows = hermes_usage.efficiency(hermes_dir, days=1, now=NOW - 5000 * DAY)
+    assert rows == []
