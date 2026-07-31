@@ -104,14 +104,40 @@ def test_snapshot_copies_wal_when_present(hermes_dir):
         assert conn.execute("SELECT COUNT(*) AS n FROM sessions").fetchone()["n"] == 3
 
 
-def test_snapshot_leaves_the_original_untouched(hermes_dir):
-    """The production mount is :ro -- prove we never write through to it."""
+def test_snapshot_leaves_the_source_directory_untouched(hermes_dir):
+    """The production mount is :ro. Reading a WAL database normally makes
+    SQLite create a `-shm` file beside it, which would fail on that mount --
+    working from a copy is what avoids it. Assert on the whole directory, not
+    just state.db's mtime: a stray `-shm` is precisely the failure mode."""
     import os
     src = f"{hermes_dir}/state.db"
-    before = os.stat(src).st_mtime_ns
+    before_files = set(os.listdir(hermes_dir))
+    before_mtime = os.stat(src).st_mtime_ns
     with hermes_usage.snapshot(hermes_dir) as conn:
         conn.execute("SELECT COUNT(*) FROM sessions").fetchone()
-    assert os.stat(src).st_mtime_ns == before
+    assert set(os.listdir(hermes_dir)) == before_files
+    assert os.stat(src).st_mtime_ns == before_mtime
+
+
+def test_snapshot_reads_a_real_wal_database(tmp_path):
+    """The other fixtures use SQLite's default journal mode, so they never
+    exercise the constraint this module exists for. This one is genuinely
+    WAL, with committed rows still sitting in the -wal file."""
+    data_dir = tmp_path / "hermes-data"
+    data_dir.mkdir()
+    db = data_dir / "state.db"
+    writer = sqlite3.connect(str(db))
+    writer.execute("PRAGMA journal_mode=WAL")
+    writer.execute("CREATE TABLE sessions (id TEXT PRIMARY KEY, source TEXT)")
+    writer.execute("INSERT INTO sessions VALUES ('s1', 'whatsapp')")
+    writer.commit()
+    assert (data_dir / "state.db-wal").exists()
+    try:
+        # Writer still open, exactly as Hermes would be.
+        with hermes_usage.snapshot(str(data_dir)) as conn:
+            assert conn.execute("SELECT source FROM sessions").fetchone()["source"] == "whatsapp"
+    finally:
+        writer.close()
 
 
 def test_read_usage_rows_returns_raw_counters_with_platform(hermes_dir):

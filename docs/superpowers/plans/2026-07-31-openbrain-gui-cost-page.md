@@ -14,16 +14,27 @@
 
 ## Deviation from the spec (read before starting)
 
-Spec §4.2 says the snapshot copy is opened with `mode=ro`. **This does not work** and the plan
-implements it differently.
+Spec §4.2 says the snapshot copy is opened with `mode=ro`. The plan opens the **copy** read-write
+instead, and the spec's stated reason for the copy was imprecise.
 
-SQLite must replay the `-wal` file into the database when opening it, which requires write access
-to the database file. `mode=ro` therefore fails on a WAL database whose WAL is non-empty — which
-is exactly the state a live `state.db` is always in.
+**Corrected during implementation, verified experimentally.** The earlier claim — "SQLite must
+replay the `-wal`, which requires write access to the database *file*, so `mode=ro` fails on any
+live database" — is wrong. `mode=ro` against a live WAL database on a writable directory
+*succeeds*.
 
-The plan opens the **copy** read-write instead. Every safety property the spec cared about is
-preserved: the copy lives in a `TemporaryDirectory`, Hermes' real files are never opened for
-writing, and the mount stays `:ro` so writing to them is impossible even by accident.
+The actual constraint: reading a WAL database makes SQLite create and maintain a **`-shm`
+coordination file next to the database**, which requires write access to the containing
+**directory**. Two consequences, either sufficient on its own:
+
+- The production mount is `:ro`, so creating the `-shm` fails and the open errors.
+- Even on a writable mount, we would be depositing files into Hermes' own data directory — the
+  precise thing this module exists to avoid.
+
+So the copy is still necessary; the copy lives in a `TemporaryDirectory` where SQLite can build its
+`-shm` freely, and Hermes' files are only ever read. `tests/test_hermes_usage.py` pins this with
+`test_snapshot_reads_a_real_wal_database` (the other fixtures use SQLite's default journal mode and
+would not catch a regression here) and `test_snapshot_leaves_the_source_directory_untouched`, which
+asserts on the whole directory rather than one mtime — a stray `-shm` is exactly the failure mode.
 
 ---
 

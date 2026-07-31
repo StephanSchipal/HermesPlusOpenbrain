@@ -1,12 +1,17 @@
 # app/hermes_usage.py
 """Read-only access to Hermes' own `state.db`, mounted at /hermes-data.
 
-`state.db` is WAL-mode. SQLite must replay the -wal into the database when
-opening it, which needs WRITE access to the database file -- so the live file
-cannot be opened at all from a read-only mount. Every read therefore copies
-state.db (+ -wal) into a TemporaryDirectory and opens the COPY read-write.
-Hermes' real files are never opened for writing; the mount stays :ro so it is
-not even possible.
+`state.db` is WAL-mode, and reading a WAL database makes SQLite create and
+maintain a `-shm` coordination file NEXT TO the database. That needs write
+access to the containing directory -- not to the database file, and not
+avoidable via `mode=ro` (verified: `mode=ro` on a writable directory succeeds
+and silently creates the `-shm`). Our mount is `:ro`, so the open fails there;
+and were it writable we would be depositing files into Hermes' own data dir,
+which is exactly what this module exists to avoid.
+
+Every read therefore copies state.db (+ -wal) into a TemporaryDirectory and
+opens the COPY, letting SQLite build its `-shm` in scratch space. Hermes' files
+are only ever read.
 
 `state.db-shm` is deliberately NOT copied: it is derived state that SQLite
 rebuilds from the WAL, and a stale copy is worse than none.
