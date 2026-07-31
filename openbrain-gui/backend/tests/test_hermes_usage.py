@@ -507,3 +507,48 @@ def test_by_session_returns_models_as_a_sorted_list(hermes_dir):
     conn.close()
     rows = {r["session_id"]: r for r in hermes_usage.by_session(hermes_dir, days=30, now=NOW)}
     assert rows["s-wa"]["models"] == ["claude-fable-5", "claude-sonnet-5"]
+
+
+def test_dashboard_returns_every_panel(hermes_dir):
+    d = hermes_usage.dashboard(hermes_dir, days=30, now=NOW)
+    assert set(d) == {"summary", "by_model", "by_platform", "by_session",
+                      "efficiency", "top_tools", "prompt_budget"}
+    assert d["summary"]["cost_usd"] == pytest.approx(34.72)
+    assert {r["model"] for r in d["by_model"]} == {"claude-sonnet-5", "claude-opus-4-8"}
+    assert d["top_tools"]["token_attribution_available"] is False
+
+
+def test_dashboard_matches_the_individual_functions(hermes_dir):
+    """dashboard() must be a pure batching of the same queries -- if these ever
+    diverge, one of the two code paths is lying to the user."""
+    d = hermes_usage.dashboard(hermes_dir, days=30, now=NOW)
+    assert d["summary"] == hermes_usage.summary(hermes_dir, days=30, now=NOW)
+    assert d["by_model"] == hermes_usage.by_model(hermes_dir, days=30, now=NOW)
+    assert d["by_platform"] == hermes_usage.by_platform(hermes_dir, days=30, now=NOW)
+    assert d["by_session"] == hermes_usage.by_session(hermes_dir, days=30, now=NOW)
+    assert d["efficiency"] == hermes_usage.efficiency(hermes_dir, days=30, now=NOW)
+    assert d["top_tools"] == hermes_usage.top_tools(hermes_dir, days=30, now=NOW)
+    assert d["prompt_budget"] == hermes_usage.prompt_budget(hermes_dir, days=30, now=NOW)
+
+
+def test_dashboard_takes_exactly_one_snapshot(hermes_dir, monkeypatch):
+    """The whole point of this function. Counting copies, not connections."""
+    calls = []
+    real = hermes_usage.snapshot
+
+    from contextlib import contextmanager
+
+    @contextmanager
+    def counting(data_dir=None):
+        calls.append(data_dir)
+        with real(data_dir) as conn:
+            yield conn
+
+    monkeypatch.setattr(hermes_usage, "snapshot", counting)
+    hermes_usage.dashboard(hermes_dir, days=30, now=NOW)
+    assert len(calls) == 1
+
+
+def test_dashboard_propagates_missing_data(tmp_path):
+    with pytest.raises(hermes_usage.HermesDataUnavailable):
+        hermes_usage.dashboard(str(tmp_path / "nope"), days=30)

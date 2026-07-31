@@ -73,6 +73,19 @@ def snapshot(data_dir: str | None = None) -> Iterator[sqlite3.Connection]:
             conn.close()
 
 
+@contextmanager
+def _conn_or_snapshot(conn: sqlite3.Connection | None,
+                      data_dir: str | None) -> Iterator[sqlite3.Connection]:
+    """Reuse a caller's connection when given one, otherwise take a fresh
+    snapshot. Lets `dashboard()` run every panel off a single copy of state.db
+    without each function needing to know about the others."""
+    if conn is not None:
+        yield conn
+    else:
+        with snapshot(data_dir) as owned:
+            yield owned
+
+
 def read_usage_rows(data_dir: str | None = None) -> list[dict]:
     """Raw per-(session, model, task) lifetime counters, plus the session's
     platform. Used by the ledger poller, which needs the numbers unaggregated
@@ -127,13 +140,14 @@ def _window(days: int, now: float | None) -> tuple[float, float]:
 
 
 def _grouped(data_dir: str | None, days: int, now: float | None,
-             group_sql: str, label: str) -> list[dict]:
+             group_sql: str, label: str, *,
+             conn: sqlite3.Connection | None = None) -> list[dict]:
     # LEFT JOIN, not JOIN: a usage row whose session has been pruned still
     # carries real spend and must not be dropped from the aggregate (same
     # rationale as `read_usage_rows`). `by_platform` passes
     # `COALESCE(s.source, '')` so orphaned rows group under '' instead of
     # vanishing.
-    with snapshot(data_dir) as conn:
+    with _conn_or_snapshot(conn, data_dir) as conn:
         rows = conn.execute(
             f"""
             SELECT {group_sql} AS {label}, {_SUM_COLUMNS}
@@ -149,22 +163,25 @@ def _grouped(data_dir: str | None, days: int, now: float | None,
 
 
 def by_model(data_dir: str | None = None, *, days: int = 30,
-             now: float | None = None) -> list[dict]:
-    return _grouped(data_dir, days, now, "u.model", "model")
+             now: float | None = None,
+             conn: sqlite3.Connection | None = None) -> list[dict]:
+    return _grouped(data_dir, days, now, "u.model", "model", conn=conn)
 
 
 def by_platform(data_dir: str | None = None, *, days: int = 30,
-                now: float | None = None) -> list[dict]:
-    return _grouped(data_dir, days, now, "COALESCE(s.source, '')", "platform")
+                now: float | None = None,
+                conn: sqlite3.Connection | None = None) -> list[dict]:
+    return _grouped(data_dir, days, now, "COALESCE(s.source, '')", "platform", conn=conn)
 
 
 def summary(data_dir: str | None = None, *, days: int = 30,
-            now: float | None = None) -> dict:
+            now: float | None = None,
+            conn: sqlite3.Connection | None = None) -> dict:
     # No join to `sessions` -- `_SUM_COLUMNS` reads only `u.*`, so a join here
     # would exist purely to filter out pruned sessions, and their spend is
     # real money that must not disappear from the total (matches the LEFT
     # JOIN rationale in `read_usage_rows`).
-    with snapshot(data_dir) as conn:
+    with _conn_or_snapshot(conn, data_dir) as conn:
         row = dict(conn.execute(
             f"""
             SELECT {_SUM_COLUMNS}
@@ -186,12 +203,13 @@ def summary(data_dir: str | None = None, *, days: int = 30,
 
 
 def efficiency(data_dir: str | None = None, *, days: int = 30,
-               now: float | None = None) -> list[dict]:
+               now: float | None = None,
+               conn: sqlite3.Connection | None = None) -> list[dict]:
     """Per-platform per-call averages. Prompt size times call count is what
     drives the bill, and cache WRITE volume per call is where the money
     actually goes -- a write costs 12.5x a read."""
     cutoff, until = _window(days, now)
-    with snapshot(data_dir) as conn:
+    with _conn_or_snapshot(conn, data_dir) as conn:
         rows = conn.execute(
             f"""
             SELECT COALESCE(s.source, '') AS platform,
@@ -236,11 +254,12 @@ def efficiency(data_dir: str | None = None, *, days: int = 30,
 
 
 def by_session(data_dir: str | None = None, *, days: int = 30,
-               now: float | None = None, limit: int = 50) -> list[dict]:
+               now: float | None = None, limit: int = 50,
+               conn: sqlite3.Connection | None = None) -> list[dict]:
     # LEFT JOIN, not JOIN: a pruned session's usage row still carries real
     # spend. `title`/`platform` are left NULL rather than invented -- the UI
     # can render "(pruned)".
-    with snapshot(data_dir) as conn:
+    with _conn_or_snapshot(conn, data_dir) as conn:
         rows = conn.execute(
             f"""
             SELECT u.session_id, s.title, s.source AS platform,
@@ -266,8 +285,9 @@ def by_session(data_dir: str | None = None, *, days: int = 30,
     ]
 
 
-def session_detail(session_id: str, *, data_dir: str | None = None) -> dict | None:
-    with snapshot(data_dir) as conn:
+def session_detail(session_id: str, *, data_dir: str | None = None,
+                    conn: sqlite3.Connection | None = None) -> dict | None:
+    with _conn_or_snapshot(conn, data_dir) as conn:
         session = conn.execute(
             """
             SELECT id, title, source AS platform, model, message_count,
@@ -319,12 +339,13 @@ _CONFIG_KEYS = (
 
 
 def top_tools(data_dir: str | None = None, *, days: int = 30,
-              now: float | None = None, limit: int = 15) -> dict:
+              now: float | None = None, limit: int = 15,
+              conn: sqlite3.Connection | None = None) -> dict:
     """Call counts by tool. Counts ONLY -- `messages.token_count` is NULL in
     every row of the live database, so tokens cannot be attributed to tools.
     The flag is returned so the UI states this rather than implying precision
     the data does not have."""
-    with snapshot(data_dir) as conn:
+    with _conn_or_snapshot(conn, data_dir) as conn:
         rows = conn.execute(
             """
             SELECT tool_name, COUNT(*) AS calls
@@ -344,8 +365,9 @@ def top_tools(data_dir: str | None = None, *, days: int = 30,
 
 
 def prompt_budget(data_dir: str | None = None, *, days: int = 30,
-                  now: float | None = None) -> list[dict]:
-    with snapshot(data_dir) as conn:
+                  now: float | None = None,
+                  conn: sqlite3.Connection | None = None) -> list[dict]:
+    with _conn_or_snapshot(conn, data_dir) as conn:
         rows = conn.execute(
             """
             SELECT s.source AS platform,
@@ -380,3 +402,23 @@ def config_snapshot(data_dir: str | None = None) -> dict:
         if value is not None:
             snap[f"{section}.{key}"] = value
     return snap
+
+
+def dashboard(data_dir: str | None = None, *, days: int = 30,
+              now: float | None = None, limit: int = 50) -> dict:
+    """Every panel of the cost page from ONE snapshot.
+
+    Each aggregation would otherwise copy state.db (~42 MB in production)
+    independently -- seven copies per page load for identical data, and seven
+    independent chances of catching a torn copy mid-checkpoint. `config_snapshot`
+    is not included here: it reads config.yaml, not the database."""
+    with snapshot(data_dir) as conn:
+        return {
+            "summary": summary(conn=conn, days=days, now=now),
+            "by_model": by_model(conn=conn, days=days, now=now),
+            "by_platform": by_platform(conn=conn, days=days, now=now),
+            "by_session": by_session(conn=conn, days=days, now=now, limit=limit),
+            "efficiency": efficiency(conn=conn, days=days, now=now),
+            "top_tools": top_tools(conn=conn, days=days, now=now),
+            "prompt_budget": prompt_budget(conn=conn, days=days, now=now),
+        }
