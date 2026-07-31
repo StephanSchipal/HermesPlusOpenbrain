@@ -363,3 +363,66 @@ def test_by_session_sums_across_multiple_usage_rows(hermes_dir):
     assert cli["cost_usd"] == pytest.approx(21.33)   # 16.33 + 5.00
     assert cli["api_calls"] == 185                   # 184 + 1
     assert cli["sessions"] == 1
+
+
+def test_top_tools_counts_only_and_declares_the_limitation(hermes_dir):
+    result = hermes_usage.top_tools(hermes_dir, days=30, now=NOW)
+    assert result["token_attribution_available"] is False
+    counts = {t["tool_name"]: t["calls"] for t in result["tools"]}
+    assert counts == {"terminal": 2, "read_file": 1}
+
+
+def test_prompt_budget_averages_per_platform(hermes_dir):
+    rows = {r["platform"]: r for r in hermes_usage.prompt_budget(hermes_dir, days=30, now=NOW)}
+    assert rows["whatsapp"]["avg_system_prompt_chars"] == pytest.approx(10000)
+    assert rows["cli"]["avg_system_prompt_chars"] == pytest.approx(17000)
+    assert rows["cli"]["max_system_prompt_chars"] == 17000
+
+
+def test_config_snapshot_returns_only_whitelisted_keys(tmp_path):
+    data_dir = tmp_path / "hermes-data"
+    data_dir.mkdir()
+    (data_dir / "config.yaml").write_text(
+        "model:\n"
+        "  default: claude-sonnet-5\n"
+        "compression:\n"
+        "  threshold: 0.5\n"
+        "tool_output:\n"
+        "  max_bytes: 50000\n"
+        "prompt_caching:\n"
+        "  cache_ttl: 5m\n"
+        "secrets:\n"
+        "  anthropic_api_key: sk-ant-SHOULD-NEVER-APPEAR\n",
+        encoding="utf-8",
+    )
+    snap = hermes_usage.config_snapshot(str(data_dir))
+    assert snap["model.default"] == "claude-sonnet-5"
+    assert snap["compression.threshold"] == 0.5
+    assert snap["tool_output.max_bytes"] == 50000
+    assert snap["prompt_caching.cache_ttl"] == "5m"
+    assert "sk-ant-SHOULD-NEVER-APPEAR" not in str(snap)
+    assert not any("secret" in k or "key" in k for k in snap)
+
+
+def test_config_snapshot_missing_file_raises(tmp_path):
+    data_dir = tmp_path / "hermes-data"
+    data_dir.mkdir()
+    with pytest.raises(hermes_usage.HermesDataUnavailable):
+        hermes_usage.config_snapshot(str(data_dir))
+
+
+def test_config_snapshot_invalid_yaml_raises(tmp_path):
+    data_dir = tmp_path / "hermes-data"
+    data_dir.mkdir()
+    (data_dir / "config.yaml").write_text("model:\n  default: [unclosed\n", encoding="utf-8")
+    with pytest.raises(hermes_usage.HermesDataUnavailable):
+        hermes_usage.config_snapshot(str(data_dir))
+
+
+def test_config_snapshot_tolerates_a_missing_section(tmp_path):
+    """Hermes config varies by install -- absent keys are simply omitted."""
+    data_dir = tmp_path / "hermes-data"
+    data_dir.mkdir()
+    (data_dir / "config.yaml").write_text("model:\n  default: claude-sonnet-5\n", encoding="utf-8")
+    snap = hermes_usage.config_snapshot(str(data_dir))
+    assert snap == {"model.default": "claude-sonnet-5"}

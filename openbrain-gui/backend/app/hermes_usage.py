@@ -27,6 +27,8 @@ from contextlib import contextmanager
 from collections.abc import Iterator
 from pathlib import Path
 
+import yaml
+
 from app.config import HERMES_DATA_DIR
 
 
@@ -261,3 +263,83 @@ def session_detail(session_id: str, *, data_dir: str | None = None) -> dict | No
     detail["system_prompt_chars"] = len(detail.get("system_prompt") or "")
     detail["models"] = [dict(m) for m in models]
     return detail
+
+
+# Only these keys are ever read out of config.yaml. The file also holds API
+# keys and auth material; an explicit whitelist means a future edit to the
+# panel cannot accidentally start returning them.
+_CONFIG_KEYS = (
+    ("model", "default"),
+    ("compression", "threshold"),
+    ("compression", "threshold_tokens"),
+    ("tool_output", "max_bytes"),
+    ("prompt_caching", "cache_ttl"),
+    ("agent", "max_turns"),
+    ("agent", "disabled_toolsets"),
+    ("sessions", "auto_prune"),
+    ("sessions", "retention_days"),
+)
+
+
+def top_tools(data_dir: str | None = None, *, days: int = 30,
+              now: float | None = None, limit: int = 15) -> dict:
+    """Call counts by tool. Counts ONLY -- `messages.token_count` is NULL in
+    every row of the live database, so tokens cannot be attributed to tools.
+    The flag is returned so the UI states this rather than implying precision
+    the data does not have."""
+    with snapshot(data_dir) as conn:
+        rows = conn.execute(
+            """
+            SELECT tool_name, COUNT(*) AS calls
+            FROM messages
+            WHERE tool_name IS NOT NULL AND tool_name != ''
+              AND timestamp >= ? AND timestamp <= ?
+            GROUP BY tool_name
+            ORDER BY calls DESC
+            LIMIT ?
+            """,
+            (*_window(days, now), limit),
+        ).fetchall()
+    return {
+        "tools": [dict(r) for r in rows],
+        "token_attribution_available": False,
+    }
+
+
+def prompt_budget(data_dir: str | None = None, *, days: int = 30,
+                  now: float | None = None) -> list[dict]:
+    with snapshot(data_dir) as conn:
+        rows = conn.execute(
+            """
+            SELECT s.source AS platform,
+                   COUNT(*)                       AS sessions,
+                   AVG(LENGTH(s.system_prompt))   AS avg_system_prompt_chars,
+                   MAX(LENGTH(s.system_prompt))   AS max_system_prompt_chars
+            FROM sessions s
+            WHERE s.system_prompt IS NOT NULL
+              AND s.id IN (SELECT session_id FROM session_model_usage
+                            WHERE last_seen >= ? AND last_seen <= ?)
+            GROUP BY s.source
+            ORDER BY avg_system_prompt_chars DESC
+            """,
+            _window(days, now),
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def config_snapshot(data_dir: str | None = None) -> dict:
+    path = Path(data_dir or HERMES_DATA_DIR) / "config.yaml"
+    if not path.is_file():
+        raise HermesDataUnavailable(f"Hermes config.yaml not found at {path}")
+    try:
+        loaded = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    except yaml.YAMLError as exc:
+        raise HermesDataUnavailable(f"config.yaml is not valid YAML: {exc}") from exc
+
+    snap: dict = {}
+    for section, key in _CONFIG_KEYS:
+        block = loaded.get(section)
+        value = block.get(key) if isinstance(block, dict) else None
+        if value is not None:
+            snap[f"{section}.{key}"] = value
+    return snap
