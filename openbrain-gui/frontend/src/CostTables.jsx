@@ -14,11 +14,15 @@ function Table({ title, rows, labelKey, labelHeader, onRowClick }) {
           </tr>
         </thead>
         <tbody>
-          {rows.map((r, i) => (
+          {rows.map((r, i) => {
+            // A pruned session keeps its spend but loses its sessions-table row,
+            // so there is no drill-down to open -- don't offer a click that can
+            // only 404.
+            const clickable = Boolean(onRowClick && r[labelKey])
+            return (
             <tr key={r.session_id ?? r[labelKey] ?? i}
-                className={onRowClick ? 'clickable' : ''}
-                onClick={onRowClick ? () => onRowClick(r) : undefined}>
-              {/* A pruned session keeps its spend but loses its title/platform. */}
+                className={clickable ? 'clickable' : ''}
+                onClick={clickable ? () => onRowClick(r) : undefined}>
               <td>{r[labelKey] || <em className="cost-note">(pruned)</em>}</td>
               <td>{r.sessions}</td>
               <td>{r.api_calls}</td>
@@ -29,7 +33,8 @@ function Table({ title, rows, labelKey, labelHeader, onRowClick }) {
               <td>{usd(r.cost_usd)}</td>
               <td>{total ? `${((r.cost_usd / total) * 100).toFixed(0)}%` : '—'}</td>
             </tr>
-          ))}
+            )
+          })}
         </tbody>
       </table>
     </section>
