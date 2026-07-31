@@ -236,3 +236,67 @@ def test_efficiency_per_platform(hermes_dir):
 def test_efficiency_with_zero_calls_does_not_divide_by_zero(hermes_dir):
     rows = hermes_usage.efficiency(hermes_dir, days=1, now=NOW - 5000 * DAY)
     assert rows == []
+
+
+def test_efficiency_averages_messages_over_distinct_sessions(hermes_dir):
+    """A session gets one usage row per (model, task) -- the live database has
+    sessions carrying a separate title_generation row. Joining and averaging
+    directly would count such a session's message_count twice."""
+    conn = sqlite3.connect(f"{hermes_dir}/state.db")
+    conn.execute(
+        "INSERT INTO session_model_usage (session_id, model, task, api_call_count,"
+        " input_tokens, output_tokens, cache_read_tokens, cache_write_tokens,"
+        " reasoning_tokens, estimated_cost_usd, cost_status, first_seen, last_seen)"
+        " VALUES ('s-wa', 'claude-sonnet-5', 'title_generation', 1, 10, 5, 0, 0,"
+        f" 0, 0.0, 'estimated', {NOW - 2 * DAY}, {NOW - 1 * DAY})"
+    )
+    conn.commit()
+    conn.close()
+
+    rows = {r["platform"]: r for r in hermes_usage.efficiency(hermes_dir, days=30, now=NOW)}
+    # s-wa is the only whatsapp session; its message_count is 347 however many
+    # usage rows it has.
+    assert rows["whatsapp"]["avg_messages_per_session"] == pytest.approx(347)
+    # The counters still sum across BOTH rows -- that part was already right.
+    assert rows["whatsapp"]["api_calls"] == 194
+    assert rows["whatsapp"]["sessions"] == 1
+
+
+def test_efficiency_avg_not_skewed_by_duplicate_rows_on_one_of_several_sessions(hermes_dir):
+    """The test above can't actually distinguish correct from buggy behaviour:
+    duplicating a session's own row can't move an average of one value (AVG(a, a)
+    == a). The fan-out only shows up once a platform has a SECOND, differently
+    -sized session sharing the group -- which is the real shape of production
+    data. Pre-fix this computed (347+347+53)/3 == 249.0 instead of (347+53)/2
+    == 200.0."""
+    conn = sqlite3.connect(f"{hermes_dir}/state.db")
+    conn.execute(
+        "INSERT INTO sessions (id, source, model, system_prompt, message_count,"
+        " tool_call_count, title, cwd, git_branch, profile_name,"
+        " compression_fallback_streak, compression_failure_error,"
+        " compression_failure_cooldown_until) VALUES"
+        " ('s-wa2', 'whatsapp', 'claude-sonnet-5', '', 53, 3, 'Second Session',"
+        " '/opt/data', NULL, 'default', 0, NULL, NULL)"
+    )
+    conn.execute(
+        "INSERT INTO session_model_usage (session_id, model, task, api_call_count,"
+        " input_tokens, output_tokens, cache_read_tokens, cache_write_tokens,"
+        " reasoning_tokens, estimated_cost_usd, cost_status, first_seen, last_seen)"
+        " VALUES ('s-wa2', 'claude-sonnet-5', '', 7, 100, 50, 0, 0,"
+        f" 0, 0.0, 'estimated', {NOW - 2 * DAY}, {NOW - 1 * DAY})"
+    )
+    # Duplicate usage row for s-wa, mirroring the real title_generation case --
+    # this is what would inflate the average pre-fix.
+    conn.execute(
+        "INSERT INTO session_model_usage (session_id, model, task, api_call_count,"
+        " input_tokens, output_tokens, cache_read_tokens, cache_write_tokens,"
+        " reasoning_tokens, estimated_cost_usd, cost_status, first_seen, last_seen)"
+        " VALUES ('s-wa', 'claude-sonnet-5', 'title_generation', 1, 10, 5, 0, 0,"
+        f" 0, 0.0, 'estimated', {NOW - 2 * DAY}, {NOW - 1 * DAY})"
+    )
+    conn.commit()
+    conn.close()
+
+    rows = {r["platform"]: r for r in hermes_usage.efficiency(hermes_dir, days=30, now=NOW)}
+    assert rows["whatsapp"]["sessions"] == 2
+    assert rows["whatsapp"]["avg_messages_per_session"] == pytest.approx((347 + 53) / 2)

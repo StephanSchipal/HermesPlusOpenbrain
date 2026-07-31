@@ -165,10 +165,20 @@ def efficiency(data_dir: str | None = None, *, days: int = 30,
     """Per-platform per-call averages. Prompt size times call count is what
     drives the bill, and cache WRITE volume per call is where the money
     actually goes -- a write costs 12.5x a read."""
+    cutoff, until = _window(days, now)
     with snapshot(data_dir) as conn:
         rows = conn.execute(
             f"""
-            SELECT s.source AS platform, AVG(s.message_count) AS avg_messages_per_session,
+            SELECT s.source AS platform,
+                   -- A session has one usage row per (model, task), so joining
+                   -- and averaging directly would count a session's messages
+                   -- once per row. Average over DISTINCT sessions instead.
+                   (SELECT AVG(s2.message_count)
+                      FROM sessions s2
+                     WHERE s2.source = s.source
+                       AND s2.id IN (SELECT session_id FROM session_model_usage
+                                      WHERE last_seen >= ? AND last_seen <= ?)
+                   ) AS avg_messages_per_session,
                    {_SUM_COLUMNS}
             FROM session_model_usage u
             JOIN sessions s ON s.id = u.session_id
@@ -177,7 +187,7 @@ def efficiency(data_dir: str | None = None, *, days: int = 30,
             HAVING api_calls > 0
             ORDER BY cost_usd DESC
             """,
-            _window(days, now),
+            (cutoff, until, cutoff, until),
         ).fetchall()
 
     result = []
