@@ -7,7 +7,12 @@ name = "openbrain-mcp"
 version = "0.1.0"
 requires-python = ">=3.11"
 dependencies = [
-    "mcp>=1.2.0",
+    # Pinned to the 1.x line for the same reason as openbrain-gui's backend:
+    # mcp 2.0.0 is a breaking release. This image has only escaped it so far
+    # because its pip layer happened to stay cached -- the next time anything
+    # invalidates it, an unpinned `>=1.2.0` would jump majors silently. Keep
+    # server and client on the same major deliberately, not by luck.
+    "mcp>=1.2.0,<2",
     "sentence-transformers>=3.0.0",
     "psycopg[binary]>=3.2.0",
     "pgvector>=0.3.0",
