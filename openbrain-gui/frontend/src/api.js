@@ -36,4 +36,17 @@ export const api = {
   deletePrompt: (id) => request(`/prompts/${id}`, { method: 'DELETE' }),
   getDeleteLog: (limit) => request(`/delete-log${limit ? `?limit=${limit}` : ''}`),
   getGraph: (k) => request(`/graph${k ? `?k=${k}` : ''}`),
+  getExternalCosts: () => request('/cost/external'),
+  saveExternalCosts: (rows) =>
+    request('/cost/external', { method: 'PUT', body: JSON.stringify({ rows }) }),
+  deleteExternalCost: (id) => request(`/cost/external/${id}`, { method: 'DELETE' }),
+  getFx: () => request('/cost/fx'),
+  refreshFx: () => request('/cost/fx/refresh', { method: 'POST' }),
+  setFx: (usd_to_eur) =>
+    request('/cost/fx', { method: 'PUT', body: JSON.stringify({ usd_to_eur }) }),
+  getCostDashboard: (days, limit = 50) => request(`/cost/dashboard?days=${days}&limit=${limit}`),
+  getCostSummary: (days) => request(`/cost/summary?days=${days}`),
+  getCostSession: (id) => request(`/cost/session/${encodeURIComponent(id)}`),
+  getCostConfig: () => request('/cost/config'),
+  getCostTimeseries: (days, group) => request(`/cost/timeseries?days=${days}&group=${group}`),
 }

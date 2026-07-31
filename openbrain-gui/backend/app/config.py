@@ -7,3 +7,9 @@ GUI_DB_PATH = os.environ.get("GUI_DB_PATH", "gui.db")
 DEFAULT_SEARCH_K = 25
 DEFAULT_DELETE_LOG_LIMIT = 50
 GRAPH_MAX_CAPTURES = 100_000
+HERMES_DATA_DIR = os.environ.get("HERMES_DATA_DIR", "/hermes-data")
+LEDGER_POLL_SECONDS = int(os.environ.get("LEDGER_POLL_SECONDS", "300"))
+FRANKFURTER_URL = os.environ.get(
+    "FRANKFURTER_URL", "https://api.frankfurter.app/latest?from=USD&to=EUR"
+)
+FX_TIMEOUT_SECONDS = 10.0

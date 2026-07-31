@@ -53,6 +53,13 @@ services:
       GUI_DB_PATH: /data/gui.db
     volumes:
       - openbrain_gui_data:/data
+      # Hermes' own data dir, READ-ONLY: state.db (token/cost usage) and
+      # config.yaml (the cost-relevant knobs). :ro means a GUI bug cannot alter
+      # Hermes' state, and it is why reads work from a copy -- SQLite needs to
+      # create a -shm beside a WAL database, which this mount forbids.
+      # Mounting state.db alone is impossible: its WAL sidecar files are
+      # created and destroyed dynamically. See design spec section 4.4.
+      - /docker/hermes-agent-7qpk/data:/hermes-data:ro
     depends_on:
       openbrain-mcp:
         condition: service_healthy

@@ -20,6 +20,61 @@ CREATE TABLE IF NOT EXISTS delete_log (
     captured_at TEXT,
     deleted_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS external_costs (
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    name                TEXT    NOT NULL DEFAULT '',
+    period              TEXT    NOT NULL DEFAULT 'monthly',
+    amount              REAL,
+    entered_currency    TEXT    NOT NULL DEFAULT 'USD',
+    url                 TEXT,
+    comments            TEXT,
+    compare_to_estimate INTEGER NOT NULL DEFAULT 0,
+    sort_order          INTEGER NOT NULL DEFAULT 0,
+    created_at          TEXT    NOT NULL,
+    updated_at          TEXT    NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS fx_rate (
+    id          INTEGER PRIMARY KEY CHECK (id = 1),
+    usd_to_eur  REAL NOT NULL,
+    source      TEXT NOT NULL,
+    fetched_at  TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS usage_ledger (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    observed_at   TEXT    NOT NULL,
+    session_id    TEXT    NOT NULL,
+    model         TEXT    NOT NULL,
+    -- Denormalised from sessions.source at write time. The chart must be able
+    -- to group by platform without /hermes-data being mounted at read time.
+    platform      TEXT    NOT NULL DEFAULT '',
+    task          TEXT    NOT NULL DEFAULT '',
+    d_api_calls   INTEGER NOT NULL DEFAULT 0,
+    d_input       INTEGER NOT NULL DEFAULT 0,
+    d_output      INTEGER NOT NULL DEFAULT 0,
+    d_cache_read  INTEGER NOT NULL DEFAULT 0,
+    d_cache_write INTEGER NOT NULL DEFAULT 0,
+    d_reasoning   INTEGER NOT NULL DEFAULT 0,
+    d_cost_usd    REAL    NOT NULL DEFAULT 0
+);
+
+CREATE INDEX IF NOT EXISTS idx_usage_ledger_observed ON usage_ledger(observed_at);
+
+CREATE TABLE IF NOT EXISTS usage_watermark (
+    session_id         TEXT NOT NULL,
+    model              TEXT NOT NULL,
+    task               TEXT NOT NULL DEFAULT '',
+    api_call_count     INTEGER NOT NULL DEFAULT 0,
+    input_tokens       INTEGER NOT NULL DEFAULT 0,
+    output_tokens      INTEGER NOT NULL DEFAULT 0,
+    cache_read_tokens  INTEGER NOT NULL DEFAULT 0,
+    cache_write_tokens INTEGER NOT NULL DEFAULT 0,
+    reasoning_tokens   INTEGER NOT NULL DEFAULT 0,
+    estimated_cost_usd REAL    NOT NULL DEFAULT 0,
+    PRIMARY KEY (session_id, model, task)
+);
 """
 
 @contextmanager

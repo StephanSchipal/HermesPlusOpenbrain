@@ -9,7 +9,9 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
 from app import mcp_client, prompts_store, delete_log_store, subject_line, graph
+from app import external_costs_store, fx, hermes_usage, ledger_store
 from app.mcp_client import OpenBrainMCPError
+from app.hermes_usage import HermesDataUnavailable
 from app.config import DEFAULT_SEARCH_K, DEFAULT_DELETE_LOG_LIMIT, GRAPH_MAX_CAPTURES
 
 router = APIRouter(prefix="/api")
@@ -37,6 +39,23 @@ class CaptureSnapshot(BaseModel):
     keywords: list[str] = []
     source_url: str | None = None
     created_at: str | None = None
+
+class ExternalCostRow(BaseModel):
+    id: int | None = None
+    name: str = ""
+    period: Literal["yearly", "monthly", "onetime", "none"] = "monthly"
+    amount: float | None = None
+    entered_currency: Literal["USD", "EUR"] = "USD"
+    url: str | None = None
+    comments: str | None = None
+    compare_to_estimate: bool = False
+    sort_order: int = 0
+
+class ExternalCostSaveRequest(BaseModel):
+    rows: list[ExternalCostRow]
+
+class FxRateRequest(BaseModel):
+    usd_to_eur: float
 
 async def _call(name: str, arguments: dict):
     try:
@@ -189,3 +208,134 @@ async def get_graph(k: int | None = Query(default=None, ge=1)):
         return {"error": "not_enough_captures", "count": len(captures)}
 
     return graph.build_keyword_graph(captures, cluster_data["clusters"])
+
+@router.get("/cost/external")
+def get_external_costs():
+    rate_row = fx.get_rate()
+    rate = rate_row["usd_to_eur"] if rate_row else None
+    rows = external_costs_store.list_rows()
+    for row in rows:
+        row.update(external_costs_store.amounts(row, rate))
+        # SQLite has no boolean type; return the same shape the request declares.
+        row["compare_to_estimate"] = bool(row["compare_to_estimate"])
+    return {
+        "rows": rows,
+        "totals": external_costs_store.totals(rows, rate),
+        "rate": rate_row,
+    }
+
+@router.put("/cost/external")
+def put_external_costs(body: ExternalCostSaveRequest):
+    # Upsert only -- deliberately does NOT delete rows missing from the payload.
+    # The Save button always PUTs the whole visible grid, and removing a row is a
+    # separate DELETE driven by the radio selection. Making this full-replace
+    # would silently drop any row not currently rendered.
+    payload = [r.model_dump() for r in body.rows]
+    try:
+        external_costs_store.save_rows(payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return get_external_costs()
+
+@router.delete("/cost/external/{row_id}")
+def delete_external_cost(row_id: int):
+    if not external_costs_store.delete_row(row_id):
+        raise HTTPException(status_code=404, detail="row not found")
+    return {"id": row_id, "deleted": True}
+
+@router.get("/cost/fx")
+def get_fx():
+    return {"rate": fx.get_rate()}
+
+@router.post("/cost/fx/refresh")
+def post_fx_refresh():
+    try:
+        return {"rate": fx.refresh_rate()}
+    except fx.FxUnavailable as exc:
+        # 503, not 500: the cached rate is still valid and the UI keeps working.
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+@router.put("/cost/fx")
+def put_fx(body: FxRateRequest):
+    try:
+        return {"rate": fx.set_manual_rate(body.usd_to_eur)}
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+def _hermes(fn, *args, **kwargs):
+    """Every state.db-backed endpoint degrades to 503 rather than 500 when the
+    mount is missing or a snapshot copy is unreadable -- the external cost grid
+    must stay usable regardless."""
+    try:
+        return fn(*args, **kwargs)
+    except HermesDataUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+@router.get("/cost/dashboard")
+def get_cost_dashboard(days: int = 30, limit: int = 50):
+    return _hermes(hermes_usage.dashboard, days=days, limit=limit)
+
+@router.get("/cost/session/{session_id}")
+def get_cost_session(session_id: str):
+    detail = _hermes(hermes_usage.session_detail, session_id)
+    if detail is None:
+        raise HTTPException(status_code=404, detail="session not found")
+    return detail
+
+@router.get("/cost/config")
+def get_cost_config():
+    return _hermes(hermes_usage.config_snapshot)
+
+@router.get("/cost/timeseries")
+def get_cost_timeseries(days: int = 30, group: str = "model"):
+    # Reads gui.db, not state.db -- deliberately no _hermes() wrapper, so the
+    # chart survives the mount being absent. `group` is annotated `str` rather
+    # than Literal so a bad value gives a 400 with a plain `detail`, matching
+    # every other /api/cost/* validation failure instead of FastAPI's 422.
+    try:
+        return ledger_store.timeseries(days=days, group=group)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+@router.get("/cost/summary")
+def get_cost_summary(days: int = 30):
+    hermes = _hermes(hermes_usage.summary, days=days)
+    rate_row = fx.get_rate()
+    rate = rate_row["usd_to_eur"] if rate_row else None
+    rows = external_costs_store.list_rows()
+    external = external_costs_store.totals(rows, rate)
+
+    total_usd = hermes["cost_usd"] + external["monthly_usd"]
+    # A EUR row with no rate contributes 0 to external["monthly_usd"], so the
+    # combined figure is understated too -- carry the flag rather than let the
+    # UI print a confident wrong number.
+    total_incomplete = external["incomplete"]
+
+    comparison = None
+    flagged = external_costs_store.flagged_row()
+    if flagged:
+        # An invoice covers a billing month, so this always compares against
+        # the 30-day figure regardless of the selected range. When 30 days is
+        # already what was asked for -- the default, and so the common case --
+        # reuse it rather than copying state.db a second time.
+        baseline = (hermes["cost_usd"] if days == 30
+                    else _hermes(hermes_usage.summary, days=30)["cost_usd"])
+        actual = external_costs_store.amounts(flagged, rate)["usd"]
+        if actual is not None and baseline:
+            comparison = {
+                "name": flagged["name"],
+                "estimated_usd": baseline,
+                "actual_usd": actual,
+                "delta_pct": (actual - baseline) / baseline * 100,
+            }
+
+    return {
+        "days": days,
+        "hermes": hermes,
+        "external": external,
+        "rate": rate_row,
+        "total_cost_of_ownership_usd": total_usd,
+        "total_cost_of_ownership_eur": total_usd * rate if rate else None,
+        "total_cost_of_ownership_incomplete": total_incomplete,
+        "estimate_vs_actual": comparison,
+    }
