@@ -1,11 +1,38 @@
-import { useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
+import { api } from './api'
+import CostSummary from './CostSummary'
+import CostTables from './CostTables'
+import CostEfficiency from './CostEfficiency'
+import SessionDetail from './SessionDetail'
+import CostConfig from './CostConfig'
 import ExternalCostGrid from './ExternalCostGrid'
 
 const RANGES = [7, 30, 90]
 
 export default function CostView() {
   const [days, setDays] = useState(30)
-  const [externalTotals, setExternalTotals] = useState(null)
+  const [data, setData] = useState({})
+  const [unavailable, setUnavailable] = useState(null)
+  const [selectedSession, setSelectedSession] = useState(null)
+
+  const load = useCallback(async () => {
+    setUnavailable(null)
+    try {
+      // One dashboard call covers every panel: the backend runs them all off a
+      // single snapshot of Hermes' 42 MB database rather than one copy each.
+      const [dashboard, summary, config] = await Promise.all([
+        api.getCostDashboard(days), api.getCostSummary(days), api.getCostConfig(),
+      ])
+      setData({ ...dashboard, summary, config })
+    } catch (e) {
+      // 503 = /hermes-data is not mounted. Part 2 below still renders.
+      setUnavailable(e.message)
+      setData({})
+      setSelectedSession(null)
+    }
+  }, [days])
+
+  useEffect(() => { load() }, [load])
 
   return (
     <div className="cost-view">
@@ -17,20 +44,25 @@ export default function CostView() {
         ))}
       </div>
 
-      {externalTotals && (
-        <p className="cost-external-total">
-          External recurring: ${externalTotals.monthly_usd.toFixed(2)}/month
-          {externalTotals.onetime_usd > 0 &&
-            ` · one-off: $${externalTotals.onetime_usd.toFixed(2)}`}
-          {/* A EUR row with no FX rate contributes 0 to the sums above, so the
-              figure is understated. Say so rather than show it bare. */}
-          {externalTotals.incomplete && (
-            <span className="cost-warning"> — incomplete, a euro row needs an exchange rate</span>
+      <CostSummary summary={data.summary} unavailable={unavailable} />
+
+      {!unavailable && data.summary && (
+        <>
+          <CostTables
+            byModel={data.by_model}
+            byPlatform={data.by_platform}
+            bySession={data.by_session}
+            onSelectSession={setSelectedSession}
+          />
+          {selectedSession && (
+            <SessionDetail sessionId={selectedSession} onClose={() => setSelectedSession(null)} />
           )}
-        </p>
+          <CostEfficiency hermes={data.summary.hermes} efficiency={data.efficiency} />
+          <CostConfig tools={data.top_tools} promptBudget={data.prompt_budget} config={data.config} />
+        </>
       )}
 
-      <ExternalCostGrid onTotalsChange={setExternalTotals} />
+      <ExternalCostGrid />
     </div>
   )
 }

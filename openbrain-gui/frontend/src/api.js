@@ -44,4 +44,8 @@ export const api = {
   refreshFx: () => request('/cost/fx/refresh', { method: 'POST' }),
   setFx: (usd_to_eur) =>
     request('/cost/fx', { method: 'PUT', body: JSON.stringify({ usd_to_eur }) }),
+  getCostDashboard: (days, limit = 50) => request(`/cost/dashboard?days=${days}&limit=${limit}`),
+  getCostSummary: (days) => request(`/cost/summary?days=${days}`),
+  getCostSession: (id) => request(`/cost/session/${encodeURIComponent(id)}`),
+  getCostConfig: () => request('/cost/config'),
 }
