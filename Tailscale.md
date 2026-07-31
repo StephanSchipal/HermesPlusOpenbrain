@@ -7,8 +7,9 @@ die Verbindung über ein privates Tailscale-VPN statt über eine öffentliche
 Portfreigabe.
 
 > Status: **Live** (seit 2026-07-29, zuletzt aktualisiert 2026-07-31 —
-> Hidden-Wrapper gegen Fenster-Flash beim Neustart; davor 2026-07-30:
-> Auto-Recovery-Watchdog + Logging)
+> Tailscale-`NoState`-Hänger dokumentiert + Auto-Recovery-Watchdog produktiv
+> bestätigt; davor am selben Tag: Hidden-Wrapper gegen Fenster-Flash; davor
+> 2026-07-30: Auto-Recovery-Watchdog + Logging)
 > Freigegebenes Verzeichnis: `D:\projects\Hermes` (Laptop `gpdsteve`)
 > MCP-Server-Name in Hermes: `laptop_fs`
 
@@ -335,6 +336,15 @@ Skript erneut laufen lassen → hat einen echten `docker restart` ausgelöst
 (Container-`StartedAt` änderte sich); ein anschließender Lauf im
 `up`-Zustand löste **keinen** weiteren Neustart aus (kein Flap-Loop).
 
+**Produktiv bestätigt (2026-07-31):** Tailscale hing auf dem Laptop von
+19:26 Uhr (30.07.) bis 07:48 Uhr (31.07.) fest (siehe
+[Troubleshooting](#troubleshooting) — `NoState`-Hänger). Sobald die
+Verbindung wiederhergestellt war, hat der Watchdog das **ohne jedes manuelle
+Eingreifen** erkannt und den Container neu gestartet
+(`/var/log/hermes-laptop-fs-watchdog.log`:
+`05:48:01Z laptop_fs recovered (down -> up), restarting ...`) — `hermes mcp
+test laptop_fs` direkt danach: ✓ Connected.
+
 Logs prüfen:
 
 ```bash
@@ -413,6 +423,7 @@ crontab -l
 | `hermes mcp test laptop_fs` von der VPS zeigt ✓, aber WhatsApp/Dashboard nutzt das Tool trotzdem nicht | Der langlebige Gateway-Prozess reconnectet nicht automatisch nach einer unterbrochenen Verbindung (neu registrierter Server, Laptop-Neustart, Netzwerk-Blip). Ein frischer CLI-Test beweist nur, dass der Server erreichbar ist — nicht, dass der laufende Gateway-Prozess ihn nutzt. Fix: `docker restart hermes-agent-7qpk-hermes-agent-1` (seit 2026-07-30 automatisiert, siehe [Auto-Recovery-Watchdog](#setup--auto-recovery-watchdog-vps)). Zur Bestätigung `docker inspect -f '{{.State.StartedAt}}' hermes-agent-7qpk-hermes-agent-1` gegen den Zeitpunkt des letzten Ausfalls vergleichen. |
 | Supergateway-Prozess verschwindet ohne Vorwarnung (Port 8931 lauscht nicht mehr, Task zeigt `LastTaskResult: 0`) | Vermutlich ausgelöst durch ein rohes HTTP-GET gegen den *stateless* Endpoint (z. B. beim manuellen Testen mit `curl`/`Invoke-WebRequest`). Für Erreichbarkeits-Checks nur TCP-Connect verwenden, nie GET (siehe Gotcha bei [MCP-Filesystem-Server-Setup](#setup--mcp-filesystem-server-laptop)). Seit 2026-07-30 wird die Prozessausgabe nach `C:\Users\steve\hermes-laptop-mcp\supergateway.log` geloggt — dort zuerst nachsehen. |
 | Kurz aufblitzendes leeres PowerShell-Fenster nach Laptop-Neustart | `powershell.exe -WindowStyle Hidden` als direkte Task-Aktion versteckt das Konsolenfenster erst *nach* dem Erzeugen — bei der Anmeldung kann der Flash sichtbar werden. Seit 2026-07-31 startet der Task stattdessen über einen VBScript-Wrapper (`wscript.exe start-filesystem-mcp-hidden.vbs`, `WScript.Shell.Run(..., 0, False)`), der von Anfang an kein Fenster erzeugt (siehe [Persistenz-Setup](#setup--persistenz-scheduled-task)). |
+| `tailscale status` zeigt dauerhaft `unexpected state: NoState` / „Tailscale is starting. Please wait.“ | Der `Tailscale`-Windows-Dienst läuft (`Status: Running`), aber die Netzwerk-Engine kommt nie hoch (`tailscale status --json` zeigt `InNetworkMap`/`InMagicSock`/`InEngine` alle `false`), obwohl Login/Prefs intakt sind (`HaveNodeKey: true`) und `tailscale netcheck` volle Konnektivität zu DERP/Kontrollebene zeigt — kein Netzwerk-, Auth- oder Update-Problem (Binaries unverändert). Live erlebt: weder Warten, noch `tailscale down`/`up`, noch ein kompletter `Restart-Service Tailscale -Force` (braucht Admin-Rechte) haben das behoben. Ein echter Laptop-Neustart war **nicht** die Ursache (`LastBootUpTime` blieb während des ganzen Vorfalls unverändert). **Was tatsächlich half:** die Tailscale-GUI/Tray-App (`tailscale-ipn.exe`) starten (Start-Icon anklicken) — der Hintergrunddienst allein reicht auf diesem Rechner offenbar nicht, die Engine initialisiert sich erst, sobald der Tray-Prozess mitläuft. Tiefere Diagnose-Logs liegen unter `C:\ProgramData\Tailscale`, dort aber ACL-geschützt (Admin/SYSTEM only) — als Nicht-Admin nicht einsehbar. |
 
 ---
 
@@ -451,6 +462,12 @@ crontab -l
 - **Laptop offline/im Schlafmodus:** `laptop_fs`-Tool-Aufrufe laufen einfach
   in den Timeout und schlagen fehl; Hermes bricht nicht ab, das Verzeichnis
   ist dann schlicht vorübergehend nicht erreichbar.
+- **Tailscale hängt fest, obwohl der Dienst "läuft":** braucht keinen
+  Laptop-Neustart als Ursache — kann auch mitten im laufenden Betrieb
+  passieren, ohne dass sich der Rechner zwischendurch neu gestartet hat.
+  Erkennbar an `tailscale status` → `unexpected state: NoState`. Fix ist
+  nicht der Dienst-Neustart, sondern die Tailscale-GUI/Tray-App zu starten
+  (Icon anklicken) — siehe [Troubleshooting](#troubleshooting).
 - **Weiteres Verzeichnis freigeben:** in
   `C:\Users\steve\hermes-laptop-mcp\start-filesystem-mcp.ps1` den Pfad als
   weiteres Positionsargument an `server-filesystem` anhängen, Task neu
@@ -465,8 +482,9 @@ crontab -l
 
 ---
 
-*Erstellt 2026-07-29, zuletzt aktualisiert 2026-07-31 (VBScript-Hidden-Wrapper
-gegen PowerShell-Fenster-Flash; 2026-07-30: Auto-Recovery-Watchdog +
-Logging). Betrifft Laptop `gpdsteve` (100.99.233.106) und Host
-`srv1608402.hstgr.cloud` (100.110.206.80), Hermes-Container
-`hermes-agent-7qpk-hermes-agent-1`.*
+*Erstellt 2026-07-29, zuletzt aktualisiert 2026-07-31 (Tailscale-`NoState`-
+Hänger dokumentiert, Auto-Recovery-Watchdog produktiv bestätigt; davor am
+selben Tag: VBScript-Hidden-Wrapper gegen PowerShell-Fenster-Flash; 2026-07-30:
+Auto-Recovery-Watchdog + Logging). Betrifft Laptop `gpdsteve`
+(100.99.233.106) und Host `srv1608402.hstgr.cloud` (100.110.206.80),
+Hermes-Container `hermes-agent-7qpk-hermes-agent-1`.*
