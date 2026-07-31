@@ -814,6 +814,20 @@ def test_external_costs_round_trip(client):
     assert len(listed["rows"]) == 1
     assert listed["rows"][0]["name"] == "Hostinger"
     assert listed["totals"]["onetime_usd"] == 0.0
+    assert listed["totals"]["incomplete"] is False
+
+
+def test_external_totals_report_incomplete_without_a_rate(client):
+    """A EUR row contributes 0 to the USD total until a rate exists. The API
+    must say so -- see external_costs_store.totals."""
+    client.put("/api/cost/external", json={"rows": [
+        {"name": "Euro thing", "period": "monthly", "amount": 10.0,
+         "entered_currency": "EUR", "url": None, "comments": None,
+         "compare_to_estimate": False, "sort_order": 0},
+    ]})
+    totals = client.get("/api/cost/external").json()["totals"]
+    assert totals["incomplete"] is True
+    assert totals["monthly_usd"] == pytest.approx(0.0)
 
 
 def test_external_costs_reject_bad_url(client):
@@ -1223,6 +1237,11 @@ export default function CostView() {
           External recurring: ${externalTotals.monthly_usd.toFixed(2)}/month
           {externalTotals.onetime_usd > 0 &&
             ` · one-off: $${externalTotals.onetime_usd.toFixed(2)}`}
+          {/* A EUR row with no FX rate contributes 0 to the sums above, so the
+              figure is understated. Say so rather than show it bare. */}
+          {externalTotals.incomplete && (
+            <span className="cost-warning"> — incomplete, a euro row needs an exchange rate</span>
+          )}
         </p>
       )}
 
@@ -1269,6 +1288,7 @@ Append to `openbrain-gui/frontend/src/index.css`:
 .cost-range { display: flex; gap: 0.5rem; }
 .cost-range button.active { font-weight: 600; text-decoration: underline; }
 .cost-external-total { margin: 0; opacity: 0.85; }
+.cost-warning { color: #c0392b; }
 
 .external-costs-header { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
 .fx-control { display: flex; align-items: center; gap: 0.5rem; }
@@ -2247,6 +2267,11 @@ def get_cost_summary(days: int = 30):
     external = external_costs_store.totals(rows, rate)
 
     total_usd = hermes["cost_usd"] + external["monthly_usd"]
+    # `external["incomplete"]` is True when a EUR-entered row could not be
+    # converted because no FX rate has been fetched yet. That row contributes 0
+    # to external["monthly_usd"], so the combined total is understated too --
+    # propagate the flag rather than let the UI show a confident wrong number.
+    total_incomplete = external["incomplete"]
 
     comparison = None
     flagged = external_costs_store.flagged_row()
@@ -2270,6 +2295,7 @@ def get_cost_summary(days: int = 30):
         "rate": rate_row,
         "total_cost_of_ownership_usd": total_usd,
         "total_cost_of_ownership_eur": total_usd * rate if rate else None,
+        "total_cost_of_ownership_incomplete": total_incomplete,
         "estimate_vs_actual": comparison,
     }
 ```
@@ -2361,11 +2387,18 @@ export default function CostSummary({ summary, unavailable }) {
     <div className="cost-tiles">
       <div className="cost-tile">
         <span className="cost-tile-label">Total cost of ownership</span>
-        <strong>{usd(summary.total_cost_of_ownership_usd)}</strong>
+        {/* Understated while a euro row has no rate -- mark it rather than
+            present a confident wrong figure. */}
+        <strong>
+          {usd(summary.total_cost_of_ownership_usd)}
+          {summary.total_cost_of_ownership_incomplete && <span className="cost-warning">*</span>}
+        </strong>
         <span className="cost-tile-sub">
-          {summary.total_cost_of_ownership_eur != null
-            ? `€${summary.total_cost_of_ownership_eur.toFixed(2)}`
-            : 'no rate'}
+          {summary.total_cost_of_ownership_incomplete
+            ? 'incomplete — a euro row needs an exchange rate'
+            : (summary.total_cost_of_ownership_eur != null
+                ? `€${summary.total_cost_of_ownership_eur.toFixed(2)}`
+                : 'no rate')}
           {summary.external.onetime_usd > 0 &&
             ` · one-off ${usd(summary.external.onetime_usd)}`}
         </span>
