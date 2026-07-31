@@ -215,6 +215,8 @@ def get_external_costs():
     rows = external_costs_store.list_rows()
     for row in rows:
         row.update(external_costs_store.amounts(row, rate))
+        # SQLite has no boolean type; return the same shape the request declares.
+        row["compare_to_estimate"] = bool(row["compare_to_estimate"])
     return {
         "rows": rows,
         "totals": external_costs_store.totals(rows, rate),
@@ -223,9 +225,11 @@ def get_external_costs():
 
 @router.put("/cost/external")
 def put_external_costs(body: ExternalCostSaveRequest):
+    # Upsert only -- deliberately does NOT delete rows missing from the payload.
+    # The Save button always PUTs the whole visible grid, and removing a row is a
+    # separate DELETE driven by the radio selection. Making this full-replace
+    # would silently drop any row not currently rendered.
     payload = [r.model_dump() for r in body.rows]
-    for row in payload:
-        row["compare_to_estimate"] = int(row["compare_to_estimate"])
     try:
         external_costs_store.save_rows(payload)
     except ValueError as exc:

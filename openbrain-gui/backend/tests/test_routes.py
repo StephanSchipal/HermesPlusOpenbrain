@@ -385,3 +385,37 @@ def test_external_totals_use_current_rate(client):
     totals = client.get("/api/cost/external").json()["totals"]
     assert totals["monthly_usd"] == pytest.approx(10.0)
     assert totals["monthly_eur"] == pytest.approx(8.0)
+
+
+def test_compare_flag_round_trips_as_a_boolean(client):
+    client.put("/api/cost/external", json={"rows": [
+        {"name": "Anthropic", "period": "monthly", "amount": 94.17,
+         "entered_currency": "USD", "url": None, "comments": None,
+         "compare_to_estimate": True, "sort_order": 0},
+    ]})
+    row = client.get("/api/cost/external").json()["rows"][0]
+    assert row["compare_to_estimate"] is True
+
+
+def test_put_handles_a_batch_of_new_and_existing_rows(client):
+    """What the Save button actually sends: the whole visible grid, mixing
+    already-persisted rows with freshly typed ones."""
+    client.put("/api/cost/external", json={"rows": [
+        {"name": "Hostinger", "period": "monthly", "amount": 12.99,
+         "entered_currency": "USD", "url": None, "comments": None,
+         "compare_to_estimate": False, "sort_order": 0},
+    ]})
+    existing = client.get("/api/cost/external").json()["rows"][0]
+
+    client.put("/api/cost/external", json={"rows": [
+        {**existing, "amount": 14.99},
+        {"name": "Anthropic", "period": "monthly", "amount": 94.17,
+         "entered_currency": "USD", "url": None, "comments": None,
+         "compare_to_estimate": False, "sort_order": 1},
+    ]})
+
+    rows = {r["name"]: r for r in client.get("/api/cost/external").json()["rows"]}
+    assert len(rows) == 2
+    assert rows["Hostinger"]["id"] == existing["id"]   # updated in place, not duplicated
+    assert rows["Hostinger"]["amount"] == 14.99
+    assert rows["Anthropic"]["amount"] == 94.17
