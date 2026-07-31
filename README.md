@@ -24,6 +24,7 @@ infrastructure you already own.
 | 5 | Wire Hermes-Agent to call `openbrain-mcp` | ✅ Done |
 | 6 | Connect Claude Desktop / Claude Code | ✅ Done |
 | 7 | End-to-end acceptance on the real stack | ✅ Done |
+| 8 | Cost & token usage page — see [`costpage.md`](costpage.md) | ✅ Live 2026-07-31 |
 
 Full details, every design decision, and a running log of bugs found/fixed during implementation:
 - Design spec — [`docs/superpowers/specs/2026-06-30-hermes-openbrain-memory-design.md`](docs/superpowers/specs/2026-06-30-hermes-openbrain-memory-design.md)
@@ -157,14 +158,18 @@ openbrain-gui/                # Phase 1 web GUI — see its own section below
   backend/
     app/
       config.py                    # env-var loading
-      db.py                         # SQLite connection + schema (prompts, delete_log)
+      db.py                         # SQLite connection + schema (prompts, delete_log, cost tables)
       mcp_client.py                  # openbrain-mcp client wrapper (bearer-token auth)
       subject_line.py                 # subject-line truncation heuristic (no model call)
       prompts_store.py                  # saved-prompts CRUD (SQLite)
       delete_log_store.py                 # delete-log insert/list (SQLite)
-      routes.py                             # the /api/* FastAPI routes
-      main.py                                 # app factory, static frontend mount
-    tests/                                     # 46 tests, pytest
+      hermes_usage.py                      # read-only snapshot of Hermes' state.db + aggregations
+      ledger_store.py                       # 5-min poller: lifetime counters -> daily deltas
+      external_costs_store.py                # the cost spreadsheet: CRUD, period + currency maths
+      fx.py                                   # USD->EUR rate (frankfurter.app / manual)
+      routes.py                                # the /api/* FastAPI routes
+      main.py                                   # app factory, ledger poller, static frontend mount
+    tests/                                       # 162 tests, pytest
     pyproject.toml
   frontend/
     src/                                        # React components (Vite, plain JS/JSX, no TS)
@@ -178,6 +183,9 @@ docs/superpowers/
                                                             revision log of every bug found+fixed
   specs/2026-07-24-openbrain-gui-phase1-design.md         # the web GUI's design spec
   plans/2026-07-24-openbrain-gui-phase1.md                 # the web GUI's implementation plan
+  specs/2026-07-31-openbrain-gui-cost-page-design.md        # the cost page's design spec
+  plans/2026-07-31-openbrain-gui-cost-page.md                # the cost page's implementation plan
+costpage.md                      # cost & token usage page — usage, limits, API, operations
 ```
 
 ## Running it locally
@@ -404,6 +412,47 @@ boundary except the SQLite stores, which use real throwaway files):
 ```bash
 cd openbrain-gui/backend && python -m pytest tests/ -v
 ```
+
+The Cost page (below) works locally without a VPS: its Part 2 spreadsheet needs nothing but
+`gui.db`, and the Hermes panels return a clean 503 when `/hermes-data` isn't mounted. Point
+`HERMES_DATA_DIR` at a **copy** of a real Hermes data directory to exercise them.
+
+## Cost & token usage page
+
+A **`Cost`** button next to "Show keyword graph" opens a page reporting where Hermes' tokens and
+dollars actually go, plus a spreadsheet for external costs (VPS, Anthropic invoice, …) combined
+into one monthly total. **Live since 2026-07-31.**
+
+**Full documentation: [`costpage.md`](costpage.md)** — how to read the numbers, the honest limits
+of the underlying data, the API, and operations.
+
+In short:
+
+- **Part 1** reads Hermes Agent's own `state.db` through a **read-only** bind mount — total cost
+  of ownership, per-model/platform/session breakdowns, a session drill-down showing the actual
+  system prompt and compression state, token composition, per-call efficiency figures, top tools,
+  prompt budget, and the cost-relevant `config.yaml` knobs (via a strict per-key whitelist, so no
+  credentials can leak).
+- **Part 2** is an editable grid: Name, Period (yearly/monthly/onetime/none), `$`/`€` with ECB
+  rate refresh, billing URL, comments. Flag one row as your real Anthropic invoice and the page
+  shows it against Hermes' own estimate.
+
+Three data facts shape the design, and the page states each rather than hiding it: Hermes stores
+**lifetime totals per session** (so a 5-minute poller samples deltas into `gui.db` to build a real
+daily chart — history starts at install), **`messages.token_count` is NULL throughout** (so tools
+show call counts only), and every cost figure is **estimated** from a pricing snapshot, not an
+invoice.
+
+Deploy needs one extra volume on `openbrain-gui`:
+
+```yaml
+      - /docker/hermes-agent-7qpk/data:/hermes-data:ro
+```
+
+Design spec — [`docs/superpowers/specs/2026-07-31-openbrain-gui-cost-page-design.md`](docs/superpowers/specs/2026-07-31-openbrain-gui-cost-page-design.md) ·
+plan — [`docs/superpowers/plans/2026-07-31-openbrain-gui-cost-page.md`](docs/superpowers/plans/2026-07-31-openbrain-gui-cost-page.md).
+A follow-up **Spec B** (action buttons via a whitelisted command bridge, and a switchable
+per-request logger) is designed but not built — see `costpage.md` §7.
 
 ## Related: Laptop-Dateizugriff via Tailscale
 
