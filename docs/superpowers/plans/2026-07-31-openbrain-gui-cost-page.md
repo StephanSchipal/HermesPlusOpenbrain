@@ -2130,6 +2130,43 @@ git commit -m "feat(gui): top tools, prompt budget, and whitelisted config snaps
 
 ---
 
+## Amendment: one snapshot per page load
+
+**Found during the Task 7–10 quality review, changing Tasks 11 and 12 before they were built.**
+
+Every `hermes_usage` aggregation opens its own snapshot, and each snapshot copies `state.db`
+(~42 MB in production). The page as originally planned fired seven or eight of those endpoints in
+parallel on every load and every date-range change — so a single page view meant **~350 MB of
+copying for data that is identical across all of them**, and eight independent chances of catching
+a torn copy.
+
+The fix is not to cache. It is to stop asking eight times: `hermes_usage` gains a `dashboard()`
+that opens **one** snapshot and runs every panel query against it, and the API exposes a single
+`GET /api/cost/dashboard`. One copy per page load, one torn-copy risk, and the frontend gets one
+fetch with one loading state instead of seven.
+
+Mechanically, each aggregation takes an optional `conn`. A tiny helper keeps the public signatures
+working unchanged, so the existing tests stay valid:
+
+```python
+@contextmanager
+def _conn_or_snapshot(conn: sqlite3.Connection | None,
+                      data_dir: str | None) -> Iterator[sqlite3.Connection]:
+    """Reuse a caller's connection when given one, otherwise take a fresh
+    snapshot. Lets `dashboard()` run every panel off a single copy of
+    state.db without each function needing to know about the other."""
+    if conn is not None:
+        yield conn
+    else:
+        with snapshot(data_dir) as owned:
+            yield owned
+```
+
+`config_snapshot` reads `config.yaml`, not the database, so it stays outside `dashboard()`.
+`/api/cost/timeseries` reads `gui.db` and is likewise unaffected.
+
+---
+
 ## Task 11: Part 1 read routes with 503 degradation
 
 **Files:**
