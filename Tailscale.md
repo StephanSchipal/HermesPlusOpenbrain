@@ -6,7 +6,8 @@ Laptop ist kein Server (wechselnde IP, NAT, nicht immer online), deshalb läuft
 die Verbindung über ein privates Tailscale-VPN statt über eine öffentliche
 Portfreigabe.
 
-> Status: **Live** (seit 2026-07-29, zuletzt aktualisiert 2026-07-30 —
+> Status: **Live** (seit 2026-07-29, zuletzt aktualisiert 2026-07-31 —
+> Hidden-Wrapper gegen Fenster-Flash beim Neustart; davor 2026-07-30:
 > Auto-Recovery-Watchdog + Logging)
 > Freigegebenes Verzeichnis: `D:\projects\Hermes` (Laptop `gpdsteve`)
 > MCP-Server-Name in Hermes: `laptop_fs`
@@ -199,10 +200,23 @@ eine Datei mit falscher/gemischter Encoding (jedes Zeichen durch ein
 Leerzeichen getrennt beim Lesen als UTF-8). Fix: explizit durch `Out-File
 -Encoding utf8` pipen statt `*>>` zu verwenden.
 
-**2. Task registrieren:**
+**2. Hidden-Wrapper** — `C:\Users\steve\hermes-laptop-mcp\start-filesystem-mcp-hidden.vbs`.
+**Gotcha (2026-07-31):** `powershell.exe -WindowStyle Hidden` als direkte
+Task-Aktion allokiert kurz ein Konsolenfenster und versteckt es erst danach —
+bei einer Anmeldung nach Neustart kann das als kurz aufblitzendes, leeres
+PowerShell-Fenster sichtbar werden (live beobachtet). Ein VBScript-Wrapper
+mit `WScript.Shell.Run(..., 0, False)` erzeugt dagegen von Anfang an gar kein
+Fenster:
+
+```vbscript
+CreateObject("WScript.Shell").Run "powershell.exe -NoProfile -ExecutionPolicy Bypass -File ""C:\Users\steve\hermes-laptop-mcp\start-filesystem-mcp.ps1""", 0, False
+```
+
+**3. Task registrieren** (Aktion zeigt auf `wscript.exe`, nicht mehr direkt
+auf `powershell.exe`):
 
 ```powershell
-$action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument '-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File "C:\Users\steve\hermes-laptop-mcp\start-filesystem-mcp.ps1"'
+$action = New-ScheduledTaskAction -Execute "wscript.exe" -Argument '"C:\Users\steve\hermes-laptop-mcp\start-filesystem-mcp-hidden.vbs"'
 $trigger = New-ScheduledTaskTrigger -AtLogOn -User "$env:COMPUTERNAME\$env:USERNAME"
 $settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([TimeSpan]::Zero) -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1) -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable
 Register-ScheduledTask -TaskName "HermesLaptopFilesystemMCP" -Action $action -Trigger $trigger -Settings $settings -RunLevel Limited -Description "MCP filesystem server for Hermes-Agent, scoped to D:\projects\Hermes, reachable via Tailscale on port 8931" -Force
@@ -210,6 +224,11 @@ Register-ScheduledTask -TaskName "HermesLaptopFilesystemMCP" -Action $action -Tr
 
 `ExecutionTimeLimit = Zero` ist wichtig — ohne das killt der Task Scheduler
 den Prozess nach dem Default-Limit (3 Tage).
+
+Verifiziert (2026-07-31): laufende Prozesskette nach Neustart über den
+Wrapper geprüft — `Get-Process ... | Where MainWindowHandle -ne 0` liefert
+für keinen der beteiligten Prozesse (`wscript`/`powershell`/`cmd`/`node`)
+einen Treffer.
 
 ---
 
@@ -393,6 +412,7 @@ crontab -l
 | Hermes verweigert einen Pfad, der eigentlich erlaubt sein sollte | Pfad exakt gegen `list_allowed_directories` prüfen (Groß-/Kleinschreibung, Backslashes) — der Filesystem-Server vergleicht strikt gegen die konfigurierte Wurzel. |
 | `hermes mcp test laptop_fs` von der VPS zeigt ✓, aber WhatsApp/Dashboard nutzt das Tool trotzdem nicht | Der langlebige Gateway-Prozess reconnectet nicht automatisch nach einer unterbrochenen Verbindung (neu registrierter Server, Laptop-Neustart, Netzwerk-Blip). Ein frischer CLI-Test beweist nur, dass der Server erreichbar ist — nicht, dass der laufende Gateway-Prozess ihn nutzt. Fix: `docker restart hermes-agent-7qpk-hermes-agent-1` (seit 2026-07-30 automatisiert, siehe [Auto-Recovery-Watchdog](#setup--auto-recovery-watchdog-vps)). Zur Bestätigung `docker inspect -f '{{.State.StartedAt}}' hermes-agent-7qpk-hermes-agent-1` gegen den Zeitpunkt des letzten Ausfalls vergleichen. |
 | Supergateway-Prozess verschwindet ohne Vorwarnung (Port 8931 lauscht nicht mehr, Task zeigt `LastTaskResult: 0`) | Vermutlich ausgelöst durch ein rohes HTTP-GET gegen den *stateless* Endpoint (z. B. beim manuellen Testen mit `curl`/`Invoke-WebRequest`). Für Erreichbarkeits-Checks nur TCP-Connect verwenden, nie GET (siehe Gotcha bei [MCP-Filesystem-Server-Setup](#setup--mcp-filesystem-server-laptop)). Seit 2026-07-30 wird die Prozessausgabe nach `C:\Users\steve\hermes-laptop-mcp\supergateway.log` geloggt — dort zuerst nachsehen. |
+| Kurz aufblitzendes leeres PowerShell-Fenster nach Laptop-Neustart | `powershell.exe -WindowStyle Hidden` als direkte Task-Aktion versteckt das Konsolenfenster erst *nach* dem Erzeugen — bei der Anmeldung kann der Flash sichtbar werden. Seit 2026-07-31 startet der Task stattdessen über einen VBScript-Wrapper (`wscript.exe start-filesystem-mcp-hidden.vbs`, `WScript.Shell.Run(..., 0, False)`), der von Anfang an kein Fenster erzeugt (siehe [Persistenz-Setup](#setup--persistenz-scheduled-task)). |
 
 ---
 
@@ -445,7 +465,8 @@ crontab -l
 
 ---
 
-*Erstellt 2026-07-29, zuletzt aktualisiert 2026-07-30 (Auto-Recovery-Watchdog
-+ Logging). Betrifft Laptop `gpdsteve` (100.99.233.106) und Host
+*Erstellt 2026-07-29, zuletzt aktualisiert 2026-07-31 (VBScript-Hidden-Wrapper
+gegen PowerShell-Fenster-Flash; 2026-07-30: Auto-Recovery-Watchdog +
+Logging). Betrifft Laptop `gpdsteve` (100.99.233.106) und Host
 `srv1608402.hstgr.cloud` (100.110.206.80), Hermes-Container
 `hermes-agent-7qpk-hermes-agent-1`.*
