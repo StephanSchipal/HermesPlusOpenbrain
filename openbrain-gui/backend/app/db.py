@@ -66,13 +66,13 @@ CREATE TABLE IF NOT EXISTS usage_watermark (
     session_id         TEXT NOT NULL,
     model              TEXT NOT NULL,
     task               TEXT NOT NULL DEFAULT '',
-    api_call_count     INTEGER,
-    input_tokens       INTEGER,
-    output_tokens      INTEGER,
-    cache_read_tokens  INTEGER,
-    cache_write_tokens INTEGER,
-    reasoning_tokens   INTEGER,
-    estimated_cost_usd REAL,
+    api_call_count     INTEGER NOT NULL DEFAULT 0,
+    input_tokens       INTEGER NOT NULL DEFAULT 0,
+    output_tokens      INTEGER NOT NULL DEFAULT 0,
+    cache_read_tokens  INTEGER NOT NULL DEFAULT 0,
+    cache_write_tokens INTEGER NOT NULL DEFAULT 0,
+    reasoning_tokens   INTEGER NOT NULL DEFAULT 0,
+    estimated_cost_usd REAL    NOT NULL DEFAULT 0,
     PRIMARY KEY (session_id, model, task)
 );
 """
