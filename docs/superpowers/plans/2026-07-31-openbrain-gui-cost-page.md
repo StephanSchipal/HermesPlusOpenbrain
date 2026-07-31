@@ -1706,8 +1706,13 @@ _SUM_COLUMNS = """
 """
 
 
-def _cutoff(days: int, now: float | None) -> float:
-    return (now if now is not None else time.time()) - days * 86400.0
+def _window(days: int, now: float | None) -> tuple[float, float]:
+    """The window is `[now - days, now]`, not just `>= cutoff` -- a lower
+    bound alone would let rows leak in whenever `now` is set earlier than the
+    data (e.g. probing an empty window in the past), since their real
+    `last_seen` values still satisfy `>= cutoff`."""
+    effective_now = now if now is not None else time.time()
+    return effective_now - days * 86400.0, effective_now
 
 
 def _grouped(data_dir: str | None, days: int, now: float | None,
@@ -1718,11 +1723,11 @@ def _grouped(data_dir: str | None, days: int, now: float | None,
             SELECT {group_sql} AS {label}, {_SUM_COLUMNS}
             FROM session_model_usage u
             JOIN sessions s ON s.id = u.session_id
-            WHERE u.last_seen >= ?
+            WHERE u.last_seen >= ? AND u.last_seen <= ?
             GROUP BY {group_sql}
             ORDER BY cost_usd DESC
             """,
-            (_cutoff(days, now),),
+            _window(days, now),
         ).fetchall()
     return [dict(r) for r in rows]
 
@@ -1745,9 +1750,9 @@ def summary(data_dir: str | None = None, *, days: int = 30,
             SELECT {_SUM_COLUMNS}
             FROM session_model_usage u
             JOIN sessions s ON s.id = u.session_id
-            WHERE u.last_seen >= ?
+            WHERE u.last_seen >= ? AND u.last_seen <= ?
             """,
-            (_cutoff(days, now),),
+            _window(days, now),
         ).fetchone())
     for key, value in row.items():
         if value is None:
@@ -1773,12 +1778,12 @@ def efficiency(data_dir: str | None = None, *, days: int = 30,
                    {_SUM_COLUMNS}
             FROM session_model_usage u
             JOIN sessions s ON s.id = u.session_id
-            WHERE u.last_seen >= ?
+            WHERE u.last_seen >= ? AND u.last_seen <= ?
             GROUP BY s.source
             HAVING api_calls > 0
             ORDER BY cost_usd DESC
             """,
-            (_cutoff(days, now),),
+            _window(days, now),
         ).fetchall()
 
     result = []
@@ -1885,12 +1890,12 @@ def by_session(data_dir: str | None = None, *, days: int = 30,
                    {_SUM_COLUMNS}
             FROM session_model_usage u
             JOIN sessions s ON s.id = u.session_id
-            WHERE u.last_seen >= ?
+            WHERE u.last_seen >= ? AND u.last_seen <= ?
             GROUP BY u.session_id
             ORDER BY cost_usd DESC
             LIMIT ?
             """,
-            (_cutoff(days, now), limit),
+            (*_window(days, now), limit),
         ).fetchall()
     return [dict(r) for r in rows]
 
@@ -2054,12 +2059,13 @@ def top_tools(data_dir: str | None = None, *, days: int = 30,
             """
             SELECT tool_name, COUNT(*) AS calls
             FROM messages
-            WHERE tool_name IS NOT NULL AND tool_name != '' AND timestamp >= ?
+            WHERE tool_name IS NOT NULL AND tool_name != ''
+              AND timestamp >= ? AND timestamp <= ?
             GROUP BY tool_name
             ORDER BY calls DESC
             LIMIT ?
             """,
-            (_cutoff(days, now), limit),
+            (*_window(days, now), limit),
         ).fetchall()
     return {
         "tools": [dict(r) for r in rows],
@@ -2078,11 +2084,12 @@ def prompt_budget(data_dir: str | None = None, *, days: int = 30,
                    MAX(LENGTH(s.system_prompt))   AS max_system_prompt_chars
             FROM sessions s
             WHERE s.system_prompt IS NOT NULL
-              AND s.id IN (SELECT session_id FROM session_model_usage WHERE last_seen >= ?)
+              AND s.id IN (SELECT session_id FROM session_model_usage
+                            WHERE last_seen >= ? AND last_seen <= ?)
             GROUP BY s.source
             ORDER BY avg_system_prompt_chars DESC
             """,
-            (_cutoff(days, now),),
+            _window(days, now),
         ).fetchall()
     return [dict(r) for r in rows]
 
