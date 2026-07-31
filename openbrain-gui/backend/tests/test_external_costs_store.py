@@ -151,3 +151,61 @@ def test_list_rows_ordered_by_sort_order_then_id(tmp_path):
         {**row, "name": "second", "sort_order": 1},
     ], path=db_path)
     assert [r["name"] for r in store.list_rows(path=db_path)] == ["first", "second", "third"]
+
+
+def test_totals_flags_incomplete_when_eur_row_has_no_rate():
+    rows = [{"amount": 10.0, "entered_currency": "EUR", "period": "monthly"}]
+    totals = store.totals(rows, None)
+    assert totals["incomplete"] is True
+    assert totals["monthly_usd"] == pytest.approx(0.0)
+
+
+def test_totals_not_incomplete_when_rate_present():
+    rows = [{"amount": 8.0, "entered_currency": "EUR", "period": "monthly"}]
+    assert store.totals(rows, RATE)["incomplete"] is False
+
+
+def test_totals_not_incomplete_for_usd_rows_without_rate():
+    rows = [{"amount": 10.0, "entered_currency": "USD", "period": "monthly"}]
+    totals = store.totals(rows, None)
+    assert totals["incomplete"] is False
+    assert totals["monthly_usd"] == pytest.approx(10.0)
+
+
+def test_totals_not_incomplete_for_parked_eur_row():
+    """A `none` row is excluded from totals by design, so it cannot make them incomplete."""
+    rows = [{"amount": 10.0, "entered_currency": "EUR", "period": "none"}]
+    assert store.totals(rows, None)["incomplete"] is False
+
+
+def test_flagged_row_returns_the_marked_row(tmp_path):
+    db_path = _db(tmp_path)
+    base = {"period": "monthly", "amount": 1.0, "entered_currency": "USD",
+            "url": None, "comments": None, "sort_order": 0}
+    store.save_rows([
+        {**base, "name": "Hostinger", "compare_to_estimate": 0},
+        {**base, "name": "Anthropic", "compare_to_estimate": 1, "sort_order": 1},
+    ], path=db_path)
+    assert store.flagged_row(path=db_path)["name"] == "Anthropic"
+
+
+def test_flagged_row_returns_none_when_nothing_flagged(tmp_path):
+    db_path = _db(tmp_path)
+    store.save_rows([
+        {"name": "Hostinger", "period": "monthly", "amount": 1.0,
+         "entered_currency": "USD", "url": None, "comments": None,
+         "compare_to_estimate": 0, "sort_order": 0},
+    ], path=db_path)
+    assert store.flagged_row(path=db_path) is None
+
+
+def test_last_flagged_row_in_batch_wins(tmp_path):
+    db_path = _db(tmp_path)
+    base = {"period": "monthly", "amount": 1.0, "entered_currency": "USD",
+            "url": None, "comments": None, "compare_to_estimate": 1}
+    store.save_rows([
+        {**base, "name": "first", "sort_order": 0},
+        {**base, "name": "second", "sort_order": 1},
+    ], path=db_path)
+    flagged = [r["name"] for r in store.list_rows(path=db_path) if r["compare_to_estimate"]]
+    assert flagged == ["second"]

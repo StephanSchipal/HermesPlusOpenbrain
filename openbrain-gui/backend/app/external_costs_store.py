@@ -44,17 +44,29 @@ def monthly_usd(row: dict, rate: float | None) -> float:
 def onetime_usd(row: dict, rate: float | None) -> float:
     if row.get("period") != "onetime":
         return 0.0
-    return amounts(row, rate)["usd"] or 0.0
+    usd = amounts(row, rate)["usd"]
+    return 0.0 if usd is None else usd
 
 
 def totals(rows: list[dict], rate: float | None) -> dict:
     monthly = sum(monthly_usd(r, rate) for r in rows)
     onetime = sum(onetime_usd(r, rate) for r in rows)
+    # A EUR-entered row has no USD value until a rate exists, and the sums above
+    # treat it as 0. Report that rather than silently understating the total --
+    # the UI shows "--" instead of a confident wrong number.
+    incomplete = any(
+        r.get("amount") is not None
+        and r.get("entered_currency") == "EUR"
+        and r.get("period") in ("yearly", "monthly", "onetime")
+        and amounts(r, rate)["usd"] is None
+        for r in rows
+    )
     return {
         "monthly_usd": monthly,
         "monthly_eur": monthly * rate if rate else None,
         "onetime_usd": onetime,
         "onetime_eur": onetime * rate if rate else None,
+        "incomplete": incomplete,
     }
 
 
@@ -129,7 +141,9 @@ def save_rows(rows: list[dict], *, path: str | None = None) -> list[dict]:
             if row.get("compare_to_estimate"):
                 # Invariant (design spec section 6.3): at most one row carries
                 # the flag. Enforced here rather than in the UI so it holds no
-                # matter who writes.
+                # matter who writes. Because this runs inside the loop, if a
+                # single batch flags several rows the LAST one in the list wins
+                # -- pinned by test_last_flagged_row_in_batch_wins.
                 conn.execute(
                     "UPDATE external_costs SET compare_to_estimate = 0 WHERE id != ?",
                     (row_id,),
