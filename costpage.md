@@ -16,8 +16,9 @@ button next to `Show keyword graph`.
 
 ### Part 1 — Hermes token spend
 
-Read live from Hermes Agent's own `state.db`. A date-range selector (7 / 30 / 90 days) drives
-everything below it.
+Read live from Hermes Agent's own `state.db`. A date-range selector (Today / 7 / 30 / 90 days)
+drives everything below it. "Today" is a rolling last-24-hours window (`days=1` under the hood),
+not a calendar-day cutoff -- consistent with how every other range already works.
 
 | Panel | What it tells you |
 |---|---|
