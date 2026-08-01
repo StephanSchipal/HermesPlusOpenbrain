@@ -6,10 +6,13 @@ Laptop ist kein Server (wechselnde IP, NAT, nicht immer online), deshalb läuft
 die Verbindung über ein privates Tailscale-VPN statt über eine öffentliche
 Portfreigabe.
 
-> Status: **Live** (seit 2026-07-29, zuletzt aktualisiert 2026-07-31 —
-> Tailscale-`NoState`-Hänger dokumentiert + Auto-Recovery-Watchdog produktiv
-> bestätigt; davor am selben Tag: Hidden-Wrapper gegen Fenster-Flash; davor
-> 2026-07-30: Auto-Recovery-Watchdog + Logging)
+> Status: **Live** (seit 2026-07-29, zuletzt aktualisiert 2026-08-01 —
+> Tailscale-Tray-Watchdog automatisiert den `NoState`-Fix; supergateway
+> läuft jetzt mit `--stateful` (behebt Absturz bei fast jedem echten
+> MCP-Handshake) + eigener Self-Heal-Loop statt unzuverlässigem Task
+> Scheduler `RestartCount`; davor 2026-07-31: `NoState`-Hänger dokumentiert,
+> Hidden-Wrapper gegen Fenster-Flash; davor 2026-07-30: Auto-Recovery-
+> Watchdog (VPS) + Logging)
 > Freigegebenes Verzeichnis: `D:\projects\Hermes` (Laptop `gpdsteve`)
 > MCP-Server-Name in Hermes: `laptop_fs`
 
@@ -20,6 +23,7 @@ Portfreigabe.
 - [Überblick](#überblick)
 - [Architektur](#architektur)
 - [Setup — Tailscale](#setup--tailscale)
+- [Setup — Tailscale-Tray-Watchdog (Laptop)](#setup--tailscale-tray-watchdog-laptop)
 - [Setup — MCP-Filesystem-Server (Laptop)](#setup--mcp-filesystem-server-laptop)
 - [Setup — Windows-Firewall](#setup--windows-firewall)
 - [Setup — Persistenz (Scheduled Task)](#setup--persistenz-scheduled-task)
@@ -113,6 +117,86 @@ docker exec hermes-agent-7qpk-hermes-agent-1 ping -c 2 100.99.233.106
 
 ---
 
+## Setup — Tailscale-Tray-Watchdog (Laptop)
+
+**Problem:** Nach einem Laptop-Neustart/-Schlafmodus kann der
+`Tailscale`-Windows-Dienst zwar `Running` sein, während sein Backend
+dauerhaft in `BackendState: NoState` hängen bleibt (`tailscale status` →
+„Tailscale is starting. Please wait.“) — dreimal live erlebt (siehe
+[Troubleshooting](#troubleshooting)). Weder Warten, noch `tailscale
+down`/`up`, noch ein kompletter `Restart-Service Tailscale` beheben das.
+**Nur das Starten der Tray/GUI-App (`tailscale-ipn.exe`) hilft** — der
+Windows-Dienst allein reicht nicht. Es gibt zwar eine
+`Tailscale.lnk`-Verknüpfung im systemweiten Autostart-Ordner
+(`C:\ProgramData\Microsoft\Windows\Start Menu\Programs\StartUp`), die soll
+das automatisch erledigen, tut es aber nicht zuverlässig — nach einem echten
+Neustart lief `tailscale-ipn.exe` trotz vorhandener Verknüpfung nicht.
+
+**Lösung:** Ein Scheduled Task prüft alle 2 Minuten (solange angemeldet)
+`BackendState` per `tailscale status --json` und startet `tailscale-ipn.exe`,
+falls es hängt und die Tray-App nicht bereits läuft.
+
+**1. Check-Skript** — `C:\Users\steve\hermes-laptop-mcp\check-tailscale-tray.ps1`:
+
+```powershell
+$logFile = "$PSScriptRoot\tailscale-watchdog.log"
+$tailscaleExe = "C:\Program Files\Tailscale\tailscale.exe"
+$trayExe = "C:\Program Files\Tailscale\tailscale-ipn.exe"
+
+try {
+    $statusJson = & $tailscaleExe status --json 2>$null
+    $status = $statusJson | ConvertFrom-Json
+    $state = $status.BackendState
+} catch {
+    $state = "Unknown"
+}
+
+if ($state -ne "Running") {
+    $trayRunning = Get-Process -Name "tailscale-ipn" -ErrorAction SilentlyContinue
+    if (-not $trayRunning) {
+        "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') BackendState=$state, tray app not running -- launching tailscale-ipn.exe" | Out-File -FilePath $logFile -Append -Encoding utf8
+        Start-Process $trayExe
+    } else {
+        "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') BackendState=$state, tray app already running -- waiting for it to connect" | Out-File -FilePath $logFile -Append -Encoding utf8
+    }
+}
+```
+
+**2. Hidden-Wrapper** (gleiches Muster wie beim MCP-Server, siehe
+[Persistenz-Setup](#setup--persistenz-scheduled-task)) —
+`check-tailscale-tray-hidden.vbs`:
+
+```vbscript
+exitCode = CreateObject("WScript.Shell").Run("powershell.exe -NoProfile -ExecutionPolicy Bypass -File ""C:\Users\steve\hermes-laptop-mcp\check-tailscale-tray.ps1""", 0, True)
+WScript.Quit(exitCode)
+```
+
+**3. Task registrieren** — `-AtLogOn` unterstützt kein natives
+Wiederholungsintervall über den Cmdlet-Parameter; stattdessen ein
+`-Once`-Trigger mit `-At (Get-Date)` (feuert sofort) plus
+`-RepetitionInterval`/`-RepetitionDuration`:
+
+```powershell
+$action = New-ScheduledTaskAction -Execute "wscript.exe" -Argument '"C:\Users\steve\hermes-laptop-mcp\check-tailscale-tray-hidden.vbs"'
+$trigger = New-ScheduledTaskTrigger -Once -At (Get-Date) -RepetitionInterval (New-TimeSpan -Minutes 2) -RepetitionDuration (New-TimeSpan -Days 3650)
+$settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit (New-TimeSpan -Minutes 1) -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -MultipleInstances IgnoreNew
+Register-ScheduledTask -TaskName "TailscaleTrayWatchdog" -Action $action -Trigger $trigger -Settings $settings -RunLevel Limited -User "$env:COMPUTERNAME\$env:USERNAME" -Description "Checks Tailscale BackendState every 2 min while logged on; launches tailscale-ipn.exe if stuck in NoState and the tray app isn't running." -Force
+```
+
+Läuft nur, solange der Task-Principal (`Limited`, an die Anmeldung
+gebunden) eingeloggt ist — genau richtig, es soll nichts vor dem Login
+versuchen. `RepetitionDuration` von 10 Jahren ist die praktikable Art, in
+PowerShell „wiederhole unbegrenzt“ auszudrücken (Task Scheduler kennt kein
+echtes „für immer“ über diesen Cmdlet-Pfad).
+
+**Verifiziert (2026-08-01):** Manuell getriggert bei bereits gesundem
+`BackendState: Running` → korrekt kein Log-Eintrag (kein unnötiger
+Tray-Start). Noch nicht in freier Wildbahn bei einem echten `NoState`-Hänger
+beobachtet — nächstes Mal prüfen, ob der automatische Start tatsächlich
+greift.
+
+---
+
 ## Setup — MCP-Filesystem-Server (Laptop)
 
 Ein Prozess, zwei Bausteine: `@modelcontextprotocol/server-filesystem` (stdio,
@@ -120,7 +204,7 @@ setzt die Pfad-Whitelist durch) gebridged über `supergateway` (macht daraus
 einen HTTP/Streamable-HTTP-Endpunkt):
 
 ```powershell
-npx -y supergateway --stdio "npx -y @modelcontextprotocol/server-filesystem D:\projects\Hermes" --outputTransport streamableHttp --port 8931 --streamableHttpPath /mcp --logLevel info
+npx -y supergateway --stdio "npx -y @modelcontextprotocol/server-filesystem D:\projects\Hermes" --outputTransport streamableHttp --port 8931 --streamableHttpPath /mcp --logLevel info --stateful
 ```
 
 - Mehrere Verzeichnisse freigeben: einfach als weitere Positionsargumente an
@@ -128,13 +212,23 @@ npx -y supergateway --stdio "npx -y @modelcontextprotocol/server-filesystem D:\p
 - **Gotcha:** Über Git-Bash/MSYS wird `/mcp` fälschlich als Windows-Pfad
   umgeschrieben (z. B. zu `D:/Tools/Git/mcp`) — MSYS-Pfadkonvertierung. In
   **PowerShell** ausführen, nicht in Git Bash.
-- **Gotcha:** Der Server läuft im *stateless*-Modus (siehe `[supergateway]
-  Running stateless server` im Log). Ein rohes HTTP-GET auf `/mcp` (z. B.
-  schnell mit `curl`/`Invoke-WebRequest` getestet) hat den Prozess in einer
-  Session zum Absturz gebracht — Port weg, Task zeigte `LastTaskResult: 0`
-  (sauberer Exit, kein von Windows erkannter Fehler, also auch kein
-  Auto-Restart durch den Task). Für reine Erreichbarkeits-Checks nur einen
-  **TCP-Connect** verwenden, nie ein GET — z. B.
+- **Kritischer Gotcha (2026-07-31), `--stateful` ist Pflicht:** Ohne dieses
+  Flag läuft supergateway im *stateless*-Modus (Default) — und in diesem
+  Modus stürzt der Prozess bei **praktisch jedem echten MCP-Handshake** ab
+  (`Error: No connection established for request ID: 0` in
+  `stdioToStatelessStreamableHttp.js`, unbehandelte Exception → Node-Prozess
+  beendet sich). Reproduziert auf 4 von 4 frischen Neustarts — kein seltener
+  Zufallsfehler, sondern nahezu deterministisch für jeden echten Client.
+  `curl`/TCP-Checks bleiben davon unberührt (die lösen keinen echten
+  Handshake aus), weshalb es lange unentdeckt blieb und wie ein
+  Tailscale-Problem aussah. Fix: `--stateful` anhängen (dokumentiertes
+  CLI-Flag, "Only supported for stdio→StreamableHttp"). Danach: 4 von 4
+  `hermes mcp test`-Versuchen erfolgreich, plus ein echter
+  `hermes chat -q`-Funktionstest über `list_allowed_directories`.
+- **Älterer Gotcha (nur im inzwischen abgelösten *stateless*-Modus
+  relevant):** Ein rohes HTTP-GET auf `/mcp` hat den stateless-Prozess
+  ebenfalls zum Absturz gebracht. Für reine Erreichbarkeits-Checks weiterhin
+  nur einen **TCP-Connect** verwenden, nie ein GET — z. B.
   `Test-NetConnection -ComputerName <ip> -Port 8931` (Windows) oder
   `bash -c 'echo > /dev/tcp/<ip>/8931'` (Linux/VPS). Ein echter
   Funktionstest läuft über `hermes mcp test laptop_fs` (valider
@@ -190,10 +284,18 @@ verloren — deshalb wird alles zusätzlich in eine Log-Datei geschrieben (wicht
 für die Post-Mortem-Analyse, falls der Prozess mal abstürzt, siehe Gotcha oben):
 
 ```powershell
+# Self-restarts on crash -- Windows Task Scheduler's RestartCount/RestartInterval
+# proved unreliable in practice (siehe Gotcha unten), und supergateway kann
+# trotz --stateful im Prinzip immer noch abstürzen. Diese Schleife garantiert
+# Recovery innerhalb von Sekunden statt sich auf Task Scheduler zu verlassen.
 $logFile = "$PSScriptRoot\supergateway.log"
-"$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') --- starting supergateway ---" | Out-File -FilePath $logFile -Append -Encoding utf8
-npx -y supergateway --stdio "npx -y @modelcontextprotocol/server-filesystem D:\projects\Hermes" --outputTransport streamableHttp --port 8931 --streamableHttpPath /mcp --logLevel info 2>&1 | Out-File -FilePath $logFile -Append -Encoding utf8
-"$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') --- supergateway exited with code $LASTEXITCODE ---" | Out-File -FilePath $logFile -Append -Encoding utf8
+while ($true) {
+    "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') --- starting supergateway ---" | Out-File -FilePath $logFile -Append -Encoding utf8
+    npx -y supergateway --stdio "npx -y @modelcontextprotocol/server-filesystem D:\projects\Hermes" --outputTransport streamableHttp --port 8931 --streamableHttpPath /mcp --logLevel info --stateful 2>&1 | Out-File -FilePath $logFile -Append -Encoding utf8
+    $exitCode = $LASTEXITCODE
+    "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') --- supergateway exited with code $exitCode, restarting in 5s ---" | Out-File -FilePath $logFile -Append -Encoding utf8
+    Start-Sleep -Seconds 5
+}
 ```
 
 **Gotcha:** einfaches `*>> $logFile`-Redirection erzeugte auf diesem Rechner
@@ -201,16 +303,32 @@ eine Datei mit falscher/gemischter Encoding (jedes Zeichen durch ein
 Leerzeichen getrennt beim Lesen als UTF-8). Fix: explizit durch `Out-File
 -Encoding utf8` pipen statt `*>>` zu verwenden.
 
+**Kritischer Gotcha (2026-07-31): Windows Task Scheduler `RestartCount`/
+`RestartInterval` funktionieren in der Praxis nicht zuverlässig**, selbst
+bei korrekter Konfiguration. Empirisch bestätigt: `RestartCount: 3`,
+`RestartInterval: PT1M` waren nachweislich am Task gesetzt, der echte
+Fehler-Exit-Code wurde nachweislich korrekt durchgereicht
+(`LastTaskResult: 4294967295`, also -1, nicht 0) — trotzdem hat Task
+Scheduler nach 12+ Minuten **kein einziges Mal** neu gestartet. Deshalb die
+`while`-Schleife oben: die eigene Wiederholungslogik im Skript ist die
+einzige verlässliche Absicherung, Task Scheduler wird nur noch für den
+initialen Start bei Anmeldung gebraucht.
+
 **2. Hidden-Wrapper** — `C:\Users\steve\hermes-laptop-mcp\start-filesystem-mcp-hidden.vbs`.
 **Gotcha (2026-07-31):** `powershell.exe -WindowStyle Hidden` als direkte
 Task-Aktion allokiert kurz ein Konsolenfenster und versteckt es erst danach —
 bei einer Anmeldung nach Neustart kann das als kurz aufblitzendes, leeres
 PowerShell-Fenster sichtbar werden (live beobachtet). Ein VBScript-Wrapper
-mit `WScript.Shell.Run(..., 0, False)` erzeugt dagegen von Anfang an gar kein
-Fenster:
+mit `WScript.Shell.Run(..., 0, ...)` erzeugt dagegen von Anfang an gar kein
+Fenster. Der dritte Parameter muss **`True`** sein (auf Beendigung warten),
+nicht `False`: mit `False` kehrt `wscript.exe` sofort zurück und Task
+Scheduler hält den Task für erfolgreich beendet, obwohl der eigentliche
+(jetzt dauerhaft laufende) Prozess im Hintergrund weiterlebt — das macht
+`LastTaskResult`/den Task-Status nutzlos zur Fehlerdiagnose:
 
 ```vbscript
-CreateObject("WScript.Shell").Run "powershell.exe -NoProfile -ExecutionPolicy Bypass -File ""C:\Users\steve\hermes-laptop-mcp\start-filesystem-mcp.ps1""", 0, False
+exitCode = CreateObject("WScript.Shell").Run("powershell.exe -NoProfile -ExecutionPolicy Bypass -File ""C:\Users\steve\hermes-laptop-mcp\start-filesystem-mcp.ps1""", 0, True)
+WScript.Quit(exitCode)
 ```
 
 **3. Task registrieren** (Aktion zeigt auf `wscript.exe`, nicht mehr direkt
@@ -229,7 +347,10 @@ den Prozess nach dem Default-Limit (3 Tage).
 Verifiziert (2026-07-31): laufende Prozesskette nach Neustart über den
 Wrapper geprüft — `Get-Process ... | Where MainWindowHandle -ne 0` liefert
 für keinen der beteiligten Prozesse (`wscript`/`powershell`/`cmd`/`node`)
-einen Treffer.
+einen Treffer. Selbstheilung separat verifiziert: laufenden Prozess hart
+gekillt (`Stop-Process -Force`) → Port 8931 kam ohne jedes manuelle
+Eingreifen wieder hoch (Log zeigt `exited with code ..., restarting in 5s`
+gefolgt von einem neuen `starting supergateway`-Eintrag).
 
 ---
 
@@ -422,8 +543,10 @@ crontab -l
 | Hermes verweigert einen Pfad, der eigentlich erlaubt sein sollte | Pfad exakt gegen `list_allowed_directories` prüfen (Groß-/Kleinschreibung, Backslashes) — der Filesystem-Server vergleicht strikt gegen die konfigurierte Wurzel. |
 | `hermes mcp test laptop_fs` von der VPS zeigt ✓, aber WhatsApp/Dashboard nutzt das Tool trotzdem nicht | Der langlebige Gateway-Prozess reconnectet nicht automatisch nach einer unterbrochenen Verbindung (neu registrierter Server, Laptop-Neustart, Netzwerk-Blip). Ein frischer CLI-Test beweist nur, dass der Server erreichbar ist — nicht, dass der laufende Gateway-Prozess ihn nutzt. Fix: `docker restart hermes-agent-7qpk-hermes-agent-1` (seit 2026-07-30 automatisiert, siehe [Auto-Recovery-Watchdog](#setup--auto-recovery-watchdog-vps)). Zur Bestätigung `docker inspect -f '{{.State.StartedAt}}' hermes-agent-7qpk-hermes-agent-1` gegen den Zeitpunkt des letzten Ausfalls vergleichen. |
 | Supergateway-Prozess verschwindet ohne Vorwarnung (Port 8931 lauscht nicht mehr, Task zeigt `LastTaskResult: 0`) | Vermutlich ausgelöst durch ein rohes HTTP-GET gegen den *stateless* Endpoint (z. B. beim manuellen Testen mit `curl`/`Invoke-WebRequest`). Für Erreichbarkeits-Checks nur TCP-Connect verwenden, nie GET (siehe Gotcha bei [MCP-Filesystem-Server-Setup](#setup--mcp-filesystem-server-laptop)). Seit 2026-07-30 wird die Prozessausgabe nach `C:\Users\steve\hermes-laptop-mcp\supergateway.log` geloggt — dort zuerst nachsehen. |
-| Kurz aufblitzendes leeres PowerShell-Fenster nach Laptop-Neustart | `powershell.exe -WindowStyle Hidden` als direkte Task-Aktion versteckt das Konsolenfenster erst *nach* dem Erzeugen — bei der Anmeldung kann der Flash sichtbar werden. Seit 2026-07-31 startet der Task stattdessen über einen VBScript-Wrapper (`wscript.exe start-filesystem-mcp-hidden.vbs`, `WScript.Shell.Run(..., 0, False)`), der von Anfang an kein Fenster erzeugt (siehe [Persistenz-Setup](#setup--persistenz-scheduled-task)). |
-| `tailscale status` zeigt dauerhaft `unexpected state: NoState` / „Tailscale is starting. Please wait.“ | Der `Tailscale`-Windows-Dienst läuft (`Status: Running`), aber die Netzwerk-Engine kommt nie hoch (`tailscale status --json` zeigt `InNetworkMap`/`InMagicSock`/`InEngine` alle `false`), obwohl Login/Prefs intakt sind (`HaveNodeKey: true`) und `tailscale netcheck` volle Konnektivität zu DERP/Kontrollebene zeigt — kein Netzwerk-, Auth- oder Update-Problem (Binaries unverändert). Live erlebt: weder Warten, noch `tailscale down`/`up`, noch ein kompletter `Restart-Service Tailscale -Force` (braucht Admin-Rechte) haben das behoben. Ein echter Laptop-Neustart war **nicht** die Ursache (`LastBootUpTime` blieb während des ganzen Vorfalls unverändert). **Was tatsächlich half:** die Tailscale-GUI/Tray-App (`tailscale-ipn.exe`) starten (Start-Icon anklicken) — der Hintergrunddienst allein reicht auf diesem Rechner offenbar nicht, die Engine initialisiert sich erst, sobald der Tray-Prozess mitläuft. Tiefere Diagnose-Logs liegen unter `C:\ProgramData\Tailscale`, dort aber ACL-geschützt (Admin/SYSTEM only) — als Nicht-Admin nicht einsehbar. |
+| Kurz aufblitzendes leeres PowerShell-Fenster nach Laptop-Neustart | `powershell.exe -WindowStyle Hidden` als direkte Task-Aktion versteckt das Konsolenfenster erst *nach* dem Erzeugen — bei der Anmeldung kann der Flash sichtbar werden. Seit 2026-07-31 startet der Task stattdessen über einen VBScript-Wrapper (`wscript.exe start-filesystem-mcp-hidden.vbs`, `WScript.Shell.Run(..., 0, True)`), der von Anfang an kein Fenster erzeugt (siehe [Persistenz-Setup](#setup--persistenz-scheduled-task)). |
+| `tailscale status` zeigt dauerhaft `unexpected state: NoState` / „Tailscale is starting. Please wait.“ | Der `Tailscale`-Windows-Dienst läuft (`Status: Running`), aber die Netzwerk-Engine kommt nie hoch (`tailscale status --json` zeigt `InNetworkMap`/`InMagicSock`/`InEngine` alle `false`), obwohl Login/Prefs intakt sind (`HaveNodeKey: true`) und `tailscale netcheck` volle Konnektivität zu DERP/Kontrollebene zeigt — kein Netzwerk-, Auth- oder Update-Problem (Binaries unverändert). Live erlebt (3×): weder Warten, noch `tailscale down`/`up`, noch ein kompletter `Restart-Service Tailscale -Force` haben das behoben. Ein echter Laptop-Neustart war **nicht** immer die Ursache (einmal blieb `LastBootUpTime` während des ganzen Vorfalls unverändert). **Was hilft:** die Tailscale-GUI/Tray-App (`tailscale-ipn.exe`) starten — der Hintergrunddienst allein reicht auf diesem Rechner nicht. Seit 2026-08-01 automatisiert über den [Tailscale-Tray-Watchdog](#setup--tailscale-tray-watchdog-laptop) (prüft alle 2 Min, startet die Tray-App bei Bedarf selbst) — kein manuelles Icon-Klicken mehr nötig. |
+| `hermes mcp test laptop_fs` schlägt mit `✗ Connection failed` fehl, obwohl `curl`/TCP-Checks gegen denselben Port erfolgreich sind | Supergateway lief ohne `--stateful` (Default = *stateless*) und stürzte bei praktisch jedem echten MCP-Handshake ab (`No connection established for request ID`, siehe Gotcha bei [MCP-Filesystem-Server-Setup](#setup--mcp-filesystem-server-laptop)) — `curl`/TCP lösen keinen echten Handshake aus und bleiben unauffällig, weshalb es aussieht wie ein Tailscale-Problem. Fix: `--stateful` anhängen. |
+| Task Scheduler startet einen abgestürzten Supergateway-Prozess trotz `RestartCount`/`RestartInterval` nicht neu | Empirisch bestätigt unzuverlässig (2026-07-31) — selbst mit korrekt gesetztem `RestartCount: 3`/`RestartInterval: PT1M` und korrekt durchgereichtem Fehler-Exit-Code (`LastTaskResult` ≠ 0) kein Auto-Restart nach 12+ Minuten. Fix: eigene `while`-Retry-Schleife im Launcher-Skript statt sich auf Task Scheduler zu verlassen (siehe [Persistenz-Setup](#setup--persistenz-scheduled-task)). |
 
 ---
 
@@ -464,10 +587,11 @@ crontab -l
   ist dann schlicht vorübergehend nicht erreichbar.
 - **Tailscale hängt fest, obwohl der Dienst "läuft":** braucht keinen
   Laptop-Neustart als Ursache — kann auch mitten im laufenden Betrieb
-  passieren, ohne dass sich der Rechner zwischendurch neu gestartet hat.
-  Erkennbar an `tailscale status` → `unexpected state: NoState`. Fix ist
-  nicht der Dienst-Neustart, sondern die Tailscale-GUI/Tray-App zu starten
-  (Icon anklicken) — siehe [Troubleshooting](#troubleshooting).
+  passieren. Erkennbar an `tailscale status` → `unexpected state: NoState`.
+  Seit 2026-08-01 automatisiert: der
+  [Tailscale-Tray-Watchdog](#setup--tailscale-tray-watchdog-laptop) prüft
+  alle 2 Minuten und startet die Tray-App bei Bedarf selbst — kein
+  manuelles Icon-Klicken mehr nötig.
 - **Weiteres Verzeichnis freigeben:** in
   `C:\Users\steve\hermes-laptop-mcp\start-filesystem-mcp.ps1` den Pfad als
   weiteres Positionsargument an `server-filesystem` anhängen, Task neu
@@ -482,9 +606,11 @@ crontab -l
 
 ---
 
-*Erstellt 2026-07-29, zuletzt aktualisiert 2026-07-31 (Tailscale-`NoState`-
-Hänger dokumentiert, Auto-Recovery-Watchdog produktiv bestätigt; davor am
-selben Tag: VBScript-Hidden-Wrapper gegen PowerShell-Fenster-Flash; 2026-07-30:
-Auto-Recovery-Watchdog + Logging). Betrifft Laptop `gpdsteve`
+*Erstellt 2026-07-29, zuletzt aktualisiert 2026-08-01 (Tailscale-Tray-Watchdog
+automatisiert den `NoState`-Fix; supergateway läuft mit `--stateful` +
+eigenem Self-Heal-Loop statt Task-Scheduler-`RestartCount`; davor 2026-07-31:
+`NoState`-Hänger dokumentiert, Auto-Recovery-Watchdog produktiv bestätigt,
+VBScript-Hidden-Wrapper gegen PowerShell-Fenster-Flash; 2026-07-30:
+Auto-Recovery-Watchdog (VPS) + Logging). Betrifft Laptop `gpdsteve`
 (100.99.233.106) und Host `srv1608402.hstgr.cloud` (100.110.206.80),
 Hermes-Container `hermes-agent-7qpk-hermes-agent-1`.*
