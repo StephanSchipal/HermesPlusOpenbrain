@@ -1,7 +1,24 @@
 import { usd, tokens } from './format'
 
+const SUM_KEYS = ['sessions', 'api_calls', 'input_tokens', 'output_tokens',
+                   'cache_read_tokens', 'cache_write_tokens', 'cost_usd']
+
 function Table({ title, rows, labelKey, labelHeader, onRowClick }) {
   const total = rows.reduce((sum, r) => sum + (r.cost_usd || 0), 0)
+
+  // A pruned session keeps its spend but loses its sessions-table row, so
+  // there is no label and no drill-down to open. A long tail of these used to
+  // push real rows off screen one at a time; fold them into a single summary
+  // row at the end instead.
+  const named = rows.filter((r) => r[labelKey])
+  const pruned = rows.filter((r) => !r[labelKey])
+  const displayRows = pruned.length
+    ? [...named, {
+        ...Object.fromEntries(SUM_KEYS.map((k) => [k, pruned.reduce((s, r) => s + (r[k] || 0), 0)])),
+        _prunedCount: pruned.length,
+      }]
+    : rows
+
   return (
     <section className="cost-table-block">
       <h4>{title}</h4>
@@ -14,16 +31,13 @@ function Table({ title, rows, labelKey, labelHeader, onRowClick }) {
           </tr>
         </thead>
         <tbody>
-          {rows.map((r, i) => {
-            // A pruned session keeps its spend but loses its sessions-table row,
-            // so there is no drill-down to open -- don't offer a click that can
-            // only 404.
+          {displayRows.map((r, i) => {
             const clickable = Boolean(onRowClick && r[labelKey])
             return (
             <tr key={r.session_id ?? r[labelKey] ?? i}
                 className={clickable ? 'clickable' : ''}
                 onClick={clickable ? () => onRowClick(r) : undefined}>
-              <td>{r[labelKey] || <em className="cost-note">(pruned)</em>}</td>
+              <td>{r[labelKey] || <em className="cost-note">(pruned {r._prunedCount})</em>}</td>
               <td>{r.sessions}</td>
               <td>{r.api_calls}</td>
               <td>{tokens(r.input_tokens)}</td>

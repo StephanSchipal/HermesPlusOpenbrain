@@ -202,11 +202,11 @@ button { cursor: pointer; }
 .external-costs-error { color: #c0392b; margin: 0.25rem 0; }
 
 .external-costs-table { width: 100%; border-collapse: collapse; }
-.external-costs-table th, .external-costs-table td { padding: 0.25rem 0.4rem; text-align: left; }
+.external-costs-table th, .external-costs-table td { padding: 0.55rem 0.4rem; text-align: left; }
 .external-costs-table input[type="text"], .external-costs-table input:not([type]) { width: 100%; }
 .external-costs-table input.num { width: 6rem; text-align: right; }
 .external-costs-table tr.selected { background: rgba(127, 127, 127, 0.15); }
-.external-costs-actions { display: flex; gap: 0.5rem; }
+.external-costs-actions { display: flex; gap: 0.5rem; margin-top: 0.9rem; }
 
 .cost-tiles { display: flex; flex-wrap: wrap; gap: 1rem; }
 .cost-tile { display: flex; flex-direction: column; gap: 0.15rem; min-width: 12rem;
