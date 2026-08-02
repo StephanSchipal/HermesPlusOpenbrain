@@ -269,6 +269,7 @@ def test_get_recent_passes_filters_to_mcp_tool(client, monkeypatch):
         assert arguments == {
             "n": 25, "source": "whatsapp", "date_from": "2026-01-01",
             "date_to": None, "keywords": ["sarah", "job"], "keyword_mode": "or",
+            "ids": None,
         }
         return _list_result([{"id": "a", "summary": "note", "keywords": ["sarah"]}])
     monkeypatch.setattr(mcp_client_module, "call_tool", fake_call_tool)
@@ -283,13 +284,28 @@ def test_get_recent_defaults_to_no_filters(client, monkeypatch):
     async def fake_call_tool(name, arguments):
         assert arguments == {
             "n": 25, "source": None, "date_from": None, "date_to": None,
-            "keywords": None, "keyword_mode": "or",
+            "keywords": None, "keyword_mode": "or", "ids": None,
         }
         return _list_result([])
     monkeypatch.setattr(mcp_client_module, "call_tool", fake_call_tool)
     resp = client.get("/api/recent")
     assert resp.status_code == 200
     assert resp.json() == []
+
+def test_get_recent_passes_ids_to_mcp_tool(client, monkeypatch):
+    # The graph legend's "List" button resolves a set of capture ids (already
+    # known client-side from the loaded graph) into full rows -- exercises
+    # the query param making it through to the MCP tool call untouched.
+    async def fake_call_tool(name, arguments):
+        assert arguments["ids"] == ["id-1", "id-2"]
+        return _list_result([
+            {"id": "id-1", "summary": "note one", "keywords": []},
+            {"id": "id-2", "summary": "note two", "keywords": []},
+        ])
+    monkeypatch.setattr(mcp_client_module, "call_tool", fake_call_tool)
+    resp = client.get("/api/recent", params={"ids": ["id-1", "id-2"]})
+    assert resp.status_code == 200
+    assert [r["id"] for r in resp.json()] == ["id-1", "id-2"]
 
 def test_get_recent_error_dict_becomes_400(client, monkeypatch):
     async def fake_call_tool(name, arguments):

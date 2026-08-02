@@ -25,6 +25,7 @@ export const api = {
     if (params.date_to) query.set('date_to', params.date_to)
     for (const kw of params.keywords || []) query.append('keywords', kw)
     if (params.keyword_mode) query.set('keyword_mode', params.keyword_mode)
+    for (const id of params.ids || []) query.append('ids', id)
     return request(`/recent?${query.toString()}`)
   },
   deleteCapture: (id, snapshot) =>

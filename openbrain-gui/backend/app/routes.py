@@ -119,10 +119,11 @@ async def get_recent(
     date_to: str | None = None,
     keywords: list[str] | None = Query(default=None),
     keyword_mode: Literal["and", "or"] = "or",
+    ids: list[str] | None = Query(default=None),
 ):
     result = await _call("list_recent", {
         "n": n, "source": source, "date_from": date_from, "date_to": date_to,
-        "keywords": keywords, "keyword_mode": keyword_mode,
+        "keywords": keywords, "keyword_mode": keyword_mode, "ids": ids,
     })
     try:
         parsed = mcp_client.parse_list_result(result)

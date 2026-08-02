@@ -277,12 +277,18 @@ def list_keywords(conn: psycopg.Connection) -> list[dict]:
 
 def fetch_recent(conn: psycopg.Connection, *, n: int = 10, source: str | None = None,
                  date_from: str | None = None, date_to: str | None = None,
-                 keywords: list[str] | None = None, keyword_mode: str = "or"
+                 keywords: list[str] | None = None, keyword_mode: str = "or",
+                 ids: list[str] | None = None
                  ) -> list[dict] | dict:
     """Most recent captures, optionally narrowed by the same source/date/
     keyword filters as search_captures -- no query/ranking involved, stays
     ordered by created_at DESC. Used for filter-only browsing when there's
-    no search text at all."""
+    no search text at all.
+
+    ids: an explicit set of capture ids to fetch (e.g. "everything in these
+    clusters"), combinable with the other filters via AND. Not paginated by
+    `n` -- a caller supplying ids wants exactly those rows, not a subset
+    truncated by an unrelated default page size."""
     if (error := _validate_keyword_mode(keyword_mode)) is not None:
         return error
 
@@ -290,6 +296,10 @@ def fetch_recent(conn: psycopg.Connection, *, n: int = 10, source: str | None = 
         source=source, date_from=date_from, date_to=date_to,
         keywords=keywords, keyword_mode=keyword_mode,
     )
+    if ids is not None:
+        where_clauses.append("id = ANY(%s::uuid[])")
+        where_params.append(ids)
+        n = len(ids)
     where_sql = f"WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
     with conn.cursor() as cur:
         cur.execute(

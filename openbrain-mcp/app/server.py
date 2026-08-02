@@ -54,15 +54,19 @@ def search(query: str | None = None, capture_id: str | None = None, k: int = 5,
 @mcp.tool()
 def list_recent(n: int = 10, source: str | None = None, date_from: str | None = None,
                 date_to: str | None = None, keywords: list[str] | None = None,
-                keyword_mode: str = "or") -> list[dict] | dict:
+                keyword_mode: str = "or", ids: list[str] | None = None) -> list[dict] | dict:
     """List the most recently captured notes, optionally narrowed by the same
     source/date/keyword filters as `search` (see its docstring) -- useful for
     browsing by filter alone, with no search text. An invalid `keyword_mode`
-    returns {"error": ...} instead of raising."""
+    returns {"error": ...} instead of raising.
+
+    ids: fetch exactly these capture ids (combinable with the other filters),
+    e.g. to resolve a set of ids gathered elsewhere into full rows -- ignores
+    `n`, returns all matching ids rather than truncating to a page size."""
     with get_conn() as conn:
         return store.fetch_recent(
             conn, n=n, source=source, date_from=date_from, date_to=date_to,
-            keywords=keywords, keyword_mode=keyword_mode,
+            keywords=keywords, keyword_mode=keyword_mode, ids=ids,
         )
 
 @mcp.tool()

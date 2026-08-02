@@ -1,10 +1,8 @@
 import { useRef, useState, useEffect } from 'react'
 import { clusterColor } from './graphSimulation.js'
 
-export default function GraphLegend({ clusters, activeClusters, onToggle, onToggleAll }) {
-  const [hoveredClusterId, setHoveredClusterId] = useState(null)
+export default function GraphLegend({ clusters, activeClusters, onToggle, onToggleAll, onList }) {
   const [shown, setShown] = useState(null)
-  const hoveredCluster = clusters.find((c) => c.cluster_id === hoveredClusterId)
 
   const allChecked = clusters.length > 0 && activeClusters.size === clusters.length
   const someChecked = activeClusters.size > 0 && !allChecked
@@ -13,14 +11,18 @@ export default function GraphLegend({ clusters, activeClusters, onToggle, onTogg
     if (selectAllRef.current) selectAllRef.current.indeterminate = someChecked
   }, [someChecked])
 
+  // Every capture belongs to exactly one cluster, so no dedup needed -- just
+  // flatten the already-loaded per-cluster membership, no new fetch.
+  const selectedClusters = () => clusters.filter((c) => activeClusters.has(c.cluster_id))
+
   const handleShow = () => {
-    // Every capture belongs to exactly one cluster, so no dedup needed --
-    // just flatten the already-loaded per-cluster membership, no new fetch.
     setShown(
-      clusters
-        .filter((c) => activeClusters.has(c.cluster_id))
-        .flatMap((c) => c.captures.map((cap) => ({ ...cap, cluster_label: c.label }))),
+      selectedClusters().flatMap((c) => c.captures.map((cap) => ({ ...cap, cluster_label: c.label }))),
     )
+  }
+
+  const handleList = () => {
+    onList(selectedClusters().flatMap((c) => c.captures.map((cap) => cap.id)))
   }
 
   return (
@@ -36,12 +38,7 @@ export default function GraphLegend({ clusters, activeClusters, onToggle, onTogg
         Select all
       </label>
       {clusters.map((cluster) => (
-        <label
-          key={cluster.cluster_id}
-          className="graph-legend-row"
-          onMouseEnter={() => setHoveredClusterId(cluster.cluster_id)}
-          onMouseLeave={() => setHoveredClusterId(null)}
-        >
+        <label key={cluster.cluster_id} className="graph-legend-row">
           <input
             type="checkbox"
             checked={activeClusters.has(cluster.cluster_id)}
@@ -51,27 +48,14 @@ export default function GraphLegend({ clusters, activeClusters, onToggle, onTogg
           {cluster.label} ({cluster.size} captures)
         </label>
       ))}
-      <button
-        type="button"
-        className="graph-legend-show"
-        disabled={activeClusters.size === 0}
-        onClick={handleShow}
-      >
-        Show
-      </button>
-      {hoveredCluster && (
-        <div className="graph-tooltip">
-          <strong>{hoveredCluster.label} — {hoveredCluster.size} captures</strong>
-          <ul>
-            {hoveredCluster.captures.slice(0, 20).map((c) => (
-              <li key={c.id}>{c.central ? '★ ' : ''}{c.subject_line}</li>
-            ))}
-            {hoveredCluster.captures.length > 20 && (
-              <li>+{hoveredCluster.captures.length - 20} more</li>
-            )}
-          </ul>
-        </div>
-      )}
+      <div className="graph-legend-actions">
+        <button type="button" disabled={activeClusters.size === 0} onClick={handleShow}>
+          Show
+        </button>
+        <button type="button" disabled={activeClusters.size === 0} onClick={handleList}>
+          List
+        </button>
+      </div>
       {shown && (
         <div className="graph-legend-shown">
           <div className="graph-legend-shown-header">

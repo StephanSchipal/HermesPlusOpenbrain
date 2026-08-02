@@ -10,7 +10,7 @@ const HEIGHT = 840
 // offering more here would just be a manual value auto never reaches.
 const MAX_CLUSTER_OPTIONS = 10
 
-export default function KeywordGraph({ onKeywordClick }) {
+export default function KeywordGraph({ onKeywordClick, onListCaptures }) {
   const [data, setData] = useState(null)
   const [error, setError] = useState(null)
   const [filter, setFilter] = useState('')
@@ -145,6 +145,7 @@ export default function KeywordGraph({ onKeywordClick }) {
             activeClusters={activeClusters}
             onToggle={toggleCluster}
             onToggleAll={toggleAllClusters}
+            onList={onListCaptures}
           />
         </div>
       )}

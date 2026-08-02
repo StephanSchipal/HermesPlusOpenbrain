@@ -533,6 +533,30 @@ def test_fetch_recent_filters_by_source():
     assert len(results) == 1
     assert results[0]["source"] == "whatsapp"
 
+def test_fetch_recent_filters_by_ids():
+    _clean()
+    with get_conn() as conn:
+        r_a = store.save_capture(conn, raw_text="a", summary="note a", keywords=["x"], source="other")
+        store.save_capture(conn, raw_text="b", summary="note b", keywords=["x"], source="other")
+        r_c = store.save_capture(conn, raw_text="c", summary="note c", keywords=["x"], source="other")
+    with get_conn() as conn:
+        results = store.fetch_recent(conn, ids=[r_a["id"], r_c["id"]])
+    assert {r["id"] for r in results} == {r_a["id"], r_c["id"]}
+
+def test_fetch_recent_ids_ignores_the_n_limit():
+    # A caller resolving a known id set wants exactly those rows, not a
+    # subset truncated by an unrelated default page size.
+    _clean()
+    with get_conn() as conn:
+        ids = [
+            store.save_capture(conn, raw_text=str(i), summary=f"note {i}",
+                               keywords=["x"], source="other")["id"]
+            for i in range(3)
+        ]
+    with get_conn() as conn:
+        results = store.fetch_recent(conn, n=1, ids=ids)
+    assert {r["id"] for r in results} == set(ids)
+
 def test_fetch_recent_filters_by_date_range():
     _clean()
     with get_conn() as conn:

@@ -151,6 +151,26 @@ export default function App() {
     }
   }
 
+  const handleListCaptures = async (ids) => {
+    setSelectedId(null)
+    setView('results')
+    setHasSearched(true)
+    const token = ++searchTokenRef.current
+    setSearching(true)
+    try {
+      const results = await api.getRecent({ ids, n: ids.length })
+      if (token !== searchTokenRef.current) return
+      setRows(results)
+      setSearchK(ids.length)
+      setResultsVersion((v) => v + 1)
+      setError(null)
+    } catch (err) {
+      if (token === searchTokenRef.current) setError(err.message)
+    } finally {
+      if (token === searchTokenRef.current) setSearching(false)
+    }
+  }
+
   const handleSavePrompt = async () => {
     if (!prompt.trim()) return
     try {
@@ -299,7 +319,7 @@ export default function App() {
       {view === 'deleteLog' ? (
         <DeleteLogView />
       ) : view === 'graph' ? (
-        <KeywordGraph onKeywordClick={handleKeywordClick} />
+        <KeywordGraph onKeywordClick={handleKeywordClick} onListCaptures={handleListCaptures} />
       ) : view === 'cost' ? (
         <CostView />
       ) : searching ? (
