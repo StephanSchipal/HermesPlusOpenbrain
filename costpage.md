@@ -3,8 +3,8 @@
 A page in the OpenBrain GUI that answers two questions: **where do my Hermes tokens and dollars
 actually go**, and **what does the whole setup cost me per month**.
 
-Live since 2026-07-31 at `https://gui.<vps-host>.hstgr.cloud` — reachable from the **`Cost`**
-button next to `Show keyword graph`.
+Live since 2026-07-31 at `https://gui.<vps-host>.hstgr.cloud` — reachable from the
+**`Show cost report`** button next to `Show keyword graph`.
 
 - Design spec — [`docs/superpowers/specs/2026-07-31-openbrain-gui-cost-page-design.md`](docs/superpowers/specs/2026-07-31-openbrain-gui-cost-page-design.md)
 - Implementation plan — [`docs/superpowers/plans/2026-07-31-openbrain-gui-cost-page.md`](docs/superpowers/plans/2026-07-31-openbrain-gui-cost-page.md)
@@ -35,6 +35,27 @@ not a calendar-day cutoff -- consistent with how every other range already works
 | **Prompt budget** | Average and largest system prompt per platform |
 | **Top tools** | Call counts by tool name |
 | **Config** | The cost-relevant knobs from Hermes' `config.yaml`, each with a note on what it costs |
+
+### Saving and comparing reports
+
+Next to the date range: **Save report** and **Load stored report**. A report is a frozen copy of
+everything in the Part 1 table above — summary tiles, by-model/by-platform/top-spenders, efficiency,
+top tools, prompt budget — for whichever range was selected when you saved it. The **Spend over
+time** chart is deliberately *not* part of a saved report; it always shows live data, saved or not.
+
+**Naming is automatic**, not typed: `CostReport_{days}_{date}`, e.g. `CostReport_01_02.08.2026` for
+Today, `CostReport_07_26.07.2026-02.08.2026` for 7 days. Saving again under the same name — same day,
+same range — **overwrites** the earlier snapshot rather than creating a duplicate; there is no rename
+step, so a report's name doubles as "when and over what range this was taken".
+
+**Load stored report** opens a list of everything saved. Picking one replaces Part 1 in place with a
+banner — *"Viewing saved report: NAME (saved ...) — back to live"* — rather than opening a separate
+view. **Save** is disabled while viewing a saved report (you would just be re-saving the snapshot
+under today's name), and clicking any range button returns to live automatically.
+
+**Comparing two reports, or a report against live data, means two browser windows** — load whichever
+report each window should show, side by side. There is no in-app diff view; the loaded-report banner
+model was built specifically to make that workflow simple, not to replace it.
 
 ### Part 2 — External costs
 
@@ -264,10 +285,16 @@ agent.disabled_toolsets    sessions.auto_prune        sessions.retention_days
 | `ledger_store.py` | Poll tick (diff vs. watermark), time-series queries |
 | `external_costs_store.py` | Part 2 CRUD, period maths, currency derivation, single-flag invariant |
 | `fx.py` | USD→EUR rate: fetch, cache, manual override |
+| `cost_reports_store.py` | Save/load report snapshots, keyed by name (upsert on conflict) |
 
 ### 4.5 gui.db tables
 
-`external_costs` · `fx_rate` (single row) · `usage_ledger` · `usage_watermark`
+`external_costs` · `fx_rate` (single row) · `usage_ledger` · `usage_watermark` · `cost_reports`
+
+`cost_reports` stores the snapshot payload as an opaque JSON blob (`name TEXT PRIMARY KEY`), not
+structured columns — the comparison workflow (§ "Saving and comparing reports" above) is "load it
+back and look at the whole page," never a SQL diff between two reports, so there is nothing to gain
+from breaking the payload into queryable fields.
 
 Applied via `CREATE TABLE IF NOT EXISTS` in `init_db()`, so a deployed `gui.db` upgrades itself in
 place on next start. Existing saved prompts and delete-log rows are untouched.
@@ -289,6 +316,10 @@ DELETE /api/cost/external/{id}
 GET    /api/cost/fx
 POST   /api/cost/fx/refresh                   503 if the fetch failed; cache kept
 PUT    /api/cost/fx                           manual override
+
+GET    /api/cost/reports                      list saved reports (name/days/range_label/saved_at, no payload)
+GET    /api/cost/reports/{name}                full report incl. payload (404 if unknown)
+PUT    /api/cost/reports/{name}               save/overwrite (body: days, range_label, payload)
 ```
 
 **`PUT /api/cost/external` is upsert-only** and deliberately does not delete rows absent from the
@@ -305,6 +336,10 @@ unless it persists.
 When `/hermes-data` is unavailable, the Part 1 endpoints return 503 and the page shows a single
 red line. **Part 2 stays fully usable**, and so does the spend chart — the ledger lives in
 `gui.db` and never needs the mount. This is what makes local development possible without a VPS.
+
+Saved reports work the same way — saving/listing/loading all read and write `gui.db`, never
+`state.db`, so they keep working even with the mount absent. (**Save** is still gated on live data
+existing to save, via `data.summary`, but that gate is unrelated to the reports table itself.)
 
 ---
 
@@ -380,7 +415,7 @@ table alongside Hermes' own, which then silently drifts.
 
 ## 8. Testing
 
-162 backend tests (`openbrain-gui/backend/tests/`). The ones worth knowing about, because they
+177 backend tests (`openbrain-gui/backend/tests/`). The ones worth knowing about, because they
 each pin a bug that was actually found and fixed:
 
 - `test_window_uses_epoch_floats_not_iso_strings` — `first_seen`/`last_seen` are epoch floats. A
@@ -395,6 +430,10 @@ each pin a bug that was actually found and fixed:
   `title_generation` row were counted twice.
 - `test_config_snapshot_excludes_unlisted_keys_inside_listed_sections` — proves the whitelist is
   per-key, not per-section.
+- `test_cost_report_save_again_overwrites` — pins the deterministic-name-means-overwrite behavior
+  (no rename step, so re-saving today's report must update it, not duplicate it).
+- `test_cost_reports_work_without_hermes_data` — saved reports live in `gui.db`, same as Part 2 and
+  the ledger, so they must survive the Hermes mount being absent.
 
 There is no frontend test framework in this project; the React side is verified by `npm run build`
 plus manual checks.
