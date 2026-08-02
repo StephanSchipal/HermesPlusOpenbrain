@@ -218,6 +218,26 @@ button { cursor: pointer; }
 .cost-external-total { margin: 0; opacity: 0.85; }
 .cost-warning { color: #c0392b; }
 
+/* Save/Load report buttons: no font/size override, same reasoning as the
+   range buttons above -- an unstyled native <button> automatically matches
+   "Today"'s size and height. */
+.cost-report-actions { display: flex; align-items: center; gap: 0.5rem; margin-left: 0.75rem; }
+.cost-report-status { font-size: 0.85em; opacity: 0.85; }
+.cost-report-banner {
+  margin: 0.75rem 0 0;
+  padding: 0.4rem 0.7rem;
+  border-radius: 6px;
+  background: rgba(108, 140, 255, 0.15);
+  font-size: 0.9em;
+}
+.cost-report-list { list-style: none; margin: 0.5rem 0 0; padding: 0; max-height: 50vh; overflow-y: auto; }
+.cost-report-list li { border-bottom: 1px solid rgba(127, 127, 127, 0.15); }
+.cost-report-list button {
+  width: 100%; text-align: left; background: none; border: none;
+  padding: 0.5rem 0.25rem; cursor: pointer; color: inherit;
+}
+.cost-report-list button:hover { background: rgba(127, 127, 127, 0.1); }
+
 .external-costs-header { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
 .fx-control { display: flex; align-items: center; gap: 0.5rem; }
 .fx-meta { opacity: 0.7; font-size: 0.85em; }

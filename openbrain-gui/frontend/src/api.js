@@ -50,4 +50,8 @@ export const api = {
   getCostSession: (id) => request(`/cost/session/${encodeURIComponent(id)}`),
   getCostConfig: () => request('/cost/config'),
   getCostTimeseries: (days, group) => request(`/cost/timeseries?days=${days}&group=${group}`),
+  listCostReports: () => request('/cost/reports'),
+  getCostReport: (name) => request(`/cost/reports/${encodeURIComponent(name)}`),
+  saveCostReport: (name, body) =>
+    request(`/cost/reports/${encodeURIComponent(name)}`, { method: 'PUT', body: JSON.stringify(body) }),
 }

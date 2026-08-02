@@ -75,6 +75,20 @@ CREATE TABLE IF NOT EXISTS usage_watermark (
     estimated_cost_usd REAL    NOT NULL DEFAULT 0,
     PRIMARY KEY (session_id, model, task)
 );
+
+-- A saved point-in-time copy of the Part 1 dashboard (summary tiles, by-model/
+-- by-platform/top-spenders tables, efficiency, top tools, prompt budget) for a
+-- given range, so two ranges/days can be compared by opening the GUI in two
+-- windows -- one live, one loaded from here. `name` is the user-facing,
+-- deterministically-generated identifier (e.g. "CostReport_07_...") and the
+-- natural key: saving again under the same name overwrites it.
+CREATE TABLE IF NOT EXISTS cost_reports (
+    name        TEXT PRIMARY KEY,
+    days        INTEGER NOT NULL,
+    range_label TEXT    NOT NULL,
+    saved_at    TEXT    NOT NULL,
+    payload     TEXT    NOT NULL
+);
 """
 
 @contextmanager

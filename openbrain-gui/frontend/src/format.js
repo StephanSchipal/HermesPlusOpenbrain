@@ -26,13 +26,27 @@ function ddmmyyyy(d) {
   return `${dd}.${mm}.${d.getFullYear()}`
 }
 
+function rangeDates(days) {
+  const end = new Date()
+  const start = new Date(end)
+  start.setDate(start.getDate() - days)
+  return { start, end }
+}
+
 // "Today" is a single date; every other range is literally today minus the
 // day count, dashed to today -- matching how the range buttons already
 // select a rolling window ending now, not a calendar-aligned one.
 export function dateRangeLabel(days, isToday) {
-  const today = new Date()
-  if (isToday) return ddmmyyyy(today)
-  const start = new Date(today)
-  start.setDate(start.getDate() - days)
-  return `${ddmmyyyy(start)} - ${ddmmyyyy(today)}`
+  const { start, end } = rangeDates(days)
+  return isToday ? ddmmyyyy(end) : `${ddmmyyyy(start)} - ${ddmmyyyy(end)}`
+}
+
+// Same date math as dateRangeLabel, formatted for a filename: no spaces
+// around the dash, and the day count zero-padded into the name so reports
+// for different ranges sort and scan together, e.g. CostReport_07_20.06.2026-27.06.2026.
+export function reportName(days, isToday) {
+  const { start, end } = rangeDates(days)
+  const code = String(days).padStart(2, '0')
+  const datePart = isToday ? ddmmyyyy(end) : `${ddmmyyyy(start)}-${ddmmyyyy(end)}`
+  return `CostReport_${code}_${datePart}`
 }

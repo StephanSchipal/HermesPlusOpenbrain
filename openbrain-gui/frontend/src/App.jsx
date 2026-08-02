@@ -311,7 +311,7 @@ export default function App() {
             {view === 'graph' ? 'Back to results' : 'Show keyword graph'}
           </button>
           <button onClick={() => setView((v) => (v === 'cost' ? 'results' : 'cost'))}>
-            {view === 'cost' ? 'Back to results' : 'Cost'}
+            {view === 'cost' ? 'Back to results' : 'Show cost report'}
           </button>
         </div>
       </section>

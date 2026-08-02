@@ -9,7 +9,7 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
 from app import mcp_client, prompts_store, delete_log_store, subject_line, graph
-from app import external_costs_store, fx, hermes_usage, ledger_store
+from app import external_costs_store, fx, hermes_usage, ledger_store, cost_reports_store
 from app.mcp_client import OpenBrainMCPError
 from app.hermes_usage import HermesDataUnavailable
 from app.config import DEFAULT_SEARCH_K, DEFAULT_DELETE_LOG_LIMIT, GRAPH_MAX_CAPTURES
@@ -56,6 +56,11 @@ class ExternalCostSaveRequest(BaseModel):
 
 class FxRateRequest(BaseModel):
     usd_to_eur: float
+
+class CostReportSaveRequest(BaseModel):
+    days: int
+    range_label: str
+    payload: dict
 
 async def _call(name: str, arguments: dict):
     try:
@@ -297,6 +302,23 @@ def get_cost_timeseries(days: int = 30, group: str = "model"):
         return ledger_store.timeseries(days=days, group=group)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+@router.get("/cost/reports")
+def get_cost_reports():
+    # Reads gui.db, not state.db -- listing saved reports works even when the
+    # Hermes mount is absent, same reasoning as the timeseries route.
+    return cost_reports_store.list_reports()
+
+@router.get("/cost/reports/{name}")
+def get_cost_report(name: str):
+    report = cost_reports_store.get_report(name)
+    if report is None:
+        raise HTTPException(status_code=404, detail="report not found")
+    return report
+
+@router.put("/cost/reports/{name}")
+def put_cost_report(name: str, body: CostReportSaveRequest):
+    return cost_reports_store.save_report(name, body.days, body.range_label, body.payload)
 
 @router.get("/cost/summary")
 def get_cost_summary(days: int = 30):

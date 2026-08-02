@@ -567,3 +567,57 @@ def test_timeseries_works_without_hermes_data(client, monkeypatch, tmp_path):
     monkeypatch.setattr(hu, "HERMES_DATA_DIR", str(tmp_path / "not-mounted"))
     assert client.get("/api/cost/dashboard").status_code == 503
     assert client.get("/api/cost/timeseries?days=30&group=model").status_code == 200
+
+
+def test_cost_report_save_and_load_round_trip(client):
+    name = "CostReport_07_20.06.2026-27.06.2026"
+    save_resp = client.put(f"/api/cost/reports/{name}", json={
+        "days": 7, "range_label": "20.06.2026 - 27.06.2026",
+        "payload": {"summary": {"hermes": {"cost_usd": 12.5}}, "by_model": []},
+    })
+    assert save_resp.status_code == 200
+    assert save_resp.json()["name"] == name
+
+    loaded = client.get(f"/api/cost/reports/{name}").json()
+    assert loaded["days"] == 7
+    assert loaded["payload"]["summary"]["hermes"]["cost_usd"] == 12.5
+
+    listed = client.get("/api/cost/reports").json()
+    assert listed == [{"name": name, "days": 7,
+                       "range_label": "20.06.2026 - 27.06.2026",
+                       "saved_at": listed[0]["saved_at"]}]
+    assert "payload" not in listed[0]
+
+
+def test_cost_report_save_again_overwrites(client):
+    name = "CostReport_01_01.07.2026"
+    client.put(f"/api/cost/reports/{name}", json={
+        "days": 1, "range_label": "01.07.2026",
+        "payload": {"summary": {"hermes": {"cost_usd": 1.0}}},
+    })
+    client.put(f"/api/cost/reports/{name}", json={
+        "days": 1, "range_label": "01.07.2026",
+        "payload": {"summary": {"hermes": {"cost_usd": 2.0}}},
+    })
+    assert len(client.get("/api/cost/reports").json()) == 1
+    loaded = client.get(f"/api/cost/reports/{name}").json()
+    assert loaded["payload"]["summary"]["hermes"]["cost_usd"] == 2.0
+
+
+def test_cost_report_get_missing_returns_404(client):
+    resp = client.get("/api/cost/reports/does-not-exist")
+    assert resp.status_code == 404
+
+
+def test_cost_reports_work_without_hermes_data(client, monkeypatch, tmp_path):
+    """Saved reports live in gui.db -- saving/loading/listing them must not
+    need the Hermes mount, same reasoning as the timeseries route."""
+    import app.hermes_usage as hu
+    monkeypatch.setattr(hu, "HERMES_DATA_DIR", str(tmp_path / "not-mounted"))
+    assert client.get("/api/cost/dashboard").status_code == 503
+    name = "CostReport_01_01.07.2026"
+    assert client.put(f"/api/cost/reports/{name}", json={
+        "days": 1, "range_label": "01.07.2026", "payload": {},
+    }).status_code == 200
+    assert client.get("/api/cost/reports").status_code == 200
+    assert client.get(f"/api/cost/reports/{name}").status_code == 200
