@@ -228,71 +228,73 @@ export default function App() {
   return (
     <div className="app">
       <header className="app-header">
-        <h1>OpenBrain</h1>
+        <h1>Hermes + OpenBrain</h1>
         <ThemeToggle />
       </header>
 
       {error && <p className="error-banner">{error}</p>}
       {notice && <p className="notice-banner">{notice}</p>}
 
-      {stats && (
-        <p className="stats-line">
-          {stats.total} captures ·{' '}
-          {Object.entries(stats.by_source).map(([src, n]) => `${src}: ${n}`).join(', ')}
-          {stats.first_capture && ` · first: ${formatDateTime(stats.first_capture)}`}
-          {stats.last_capture && ` · last: ${formatDateTime(stats.last_capture)}`}
-        </p>
-      )}
+      <section className="capture-panel panel-surface">
+        {stats && (
+          <p className="stats-line">
+            {stats.total} captures ·{' '}
+            {Object.entries(stats.by_source).map(([src, n]) => `${src}: ${n}`).join(', ')}
+            {stats.first_capture && ` · first: ${formatDateTime(stats.first_capture)}`}
+            {stats.last_capture && ` · last: ${formatDateTime(stats.last_capture)}`}
+          </p>
+        )}
 
-      <div className="top-row">
-        <div className="prompt-column">
-          <PromptBar
-            prompt={prompt}
-            onPromptChange={setPrompt}
-            promptTextareaRef={promptTextareaRef}
-            savedPrompts={savedPrompts}
-            selectedPromptId={selectedPromptId}
-            onSelectSavedPrompt={handleSelectSavedPrompt}
-            onSearch={handleSearch}
-          />
-          <FilterBar
-            sources={stats ? Object.keys(stats.by_source) : []}
-            filters={filters}
-            onFiltersChange={setFilters}
-          />
-          <div className="prompt-actions">
-            <button className="search-button" onClick={handleSearch} disabled={searching}>
-              {searching ? 'Searching…' : 'Search'}
-            </button>
-            <button onClick={handleSavePrompt}>Save prompt</button>
-            <button onClick={handleDeleteSavedPrompt} disabled={!selectedPromptId}>
-              Delete prompt
-            </button>
+        <div className="top-row">
+          <div className="prompt-column">
+            <PromptBar
+              prompt={prompt}
+              onPromptChange={setPrompt}
+              promptTextareaRef={promptTextareaRef}
+              savedPrompts={savedPrompts}
+              selectedPromptId={selectedPromptId}
+              onSelectSavedPrompt={handleSelectSavedPrompt}
+              onSearch={handleSearch}
+            />
+            <FilterBar
+              sources={stats ? Object.keys(stats.by_source) : []}
+              filters={filters}
+              onFiltersChange={setFilters}
+            />
+            <div className="prompt-actions">
+              <button className="search-button" onClick={handleSearch} disabled={searching}>
+                {searching ? 'Searching…' : 'Search'}
+              </button>
+              <button onClick={handleSavePrompt}>Save prompt</button>
+              <button onClick={handleDeleteSavedPrompt} disabled={!selectedPromptId}>
+                Delete prompt
+              </button>
+            </div>
           </div>
+          <KeywordPanel onKeywordClick={handleKeywordClick} />
         </div>
-        <KeywordPanel onKeywordClick={handleKeywordClick} />
-      </div>
 
-      <div className="grid-actions">
-        <button disabled={!canActOnSelection} onClick={() => setViewingRow(selectedRow)}>
-          Summary
-        </button>
-        <button disabled={!canActOnSelection} onClick={() => setEditingRow(selectedRow)}>
-          Change
-        </button>
-        <button disabled={!canActOnSelection} onClick={handleDelete}>
-          Delete
-        </button>
-        <button onClick={() => setView((v) => (v === 'deleteLog' ? 'results' : 'deleteLog'))}>
-          {view === 'deleteLog' ? 'Back to results' : 'Show delete log'}
-        </button>
-        <button onClick={() => setView((v) => (v === 'graph' ? 'results' : 'graph'))}>
-          {view === 'graph' ? 'Back to results' : 'Show keyword graph'}
-        </button>
-        <button onClick={() => setView((v) => (v === 'cost' ? 'results' : 'cost'))}>
-          {view === 'cost' ? 'Back to results' : 'Cost'}
-        </button>
-      </div>
+        <div className="grid-actions">
+          <button disabled={!canActOnSelection} onClick={() => setViewingRow(selectedRow)}>
+            Summary
+          </button>
+          <button disabled={!canActOnSelection} onClick={() => setEditingRow(selectedRow)}>
+            Change
+          </button>
+          <button disabled={!canActOnSelection} onClick={handleDelete}>
+            Delete
+          </button>
+          <button onClick={() => setView((v) => (v === 'deleteLog' ? 'results' : 'deleteLog'))}>
+            {view === 'deleteLog' ? 'Back to results' : 'Show delete log'}
+          </button>
+          <button onClick={() => setView((v) => (v === 'graph' ? 'results' : 'graph'))}>
+            {view === 'graph' ? 'Back to results' : 'Show keyword graph'}
+          </button>
+          <button onClick={() => setView((v) => (v === 'cost' ? 'results' : 'cost'))}>
+            {view === 'cost' ? 'Back to results' : 'Cost'}
+          </button>
+        </div>
+      </section>
 
       {view === 'deleteLog' ? (
         <DeleteLogView />

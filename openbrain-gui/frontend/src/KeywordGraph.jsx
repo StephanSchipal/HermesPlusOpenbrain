@@ -79,6 +79,10 @@ export default function KeywordGraph({ onKeywordClick }) {
     })
   }
 
+  const toggleAllClusters = (selectAll) => {
+    setActiveClusters(selectAll ? new Set(data.clusters.map((c) => c.cluster_id)) : new Set())
+  }
+
   const showGraph = data && !data.error
 
   return (
@@ -136,7 +140,12 @@ export default function KeywordGraph({ onKeywordClick }) {
               </div>
             )}
           </div>
-          <GraphLegend clusters={data.clusters} activeClusters={activeClusters} onToggle={toggleCluster} />
+          <GraphLegend
+            clusters={data.clusters}
+            activeClusters={activeClusters}
+            onToggle={toggleCluster}
+            onToggleAll={toggleAllClusters}
+          />
         </div>
       )}
     </div>

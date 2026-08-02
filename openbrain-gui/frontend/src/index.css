@@ -19,6 +19,11 @@ body {
 }
 .app { max-width: 1100px; margin: 0 auto; padding: 16px; }
 .app-header { display: flex; justify-content: space-between; align-items: center; }
+/* Shared grey rounded surface -- capture controls, Part 1 and Part 2 of the
+   Cost page all use this same panel treatment to read as distinct blocks
+   against the plain page background. */
+.panel-surface { border-radius: 8px; background: rgba(127, 127, 127, 0.13); }
+.capture-panel { margin: 0.75rem 0 1rem; padding: 1rem 1.1rem 1.2rem; }
 .theme-toggle {
   background: none; border: 1px solid var(--border); border-radius: 4px;
   padding: 4px 8px; cursor: pointer;
@@ -150,6 +155,19 @@ button { cursor: pointer; }
 .graph-legend { flex: 1; border-left: 1px solid var(--border); padding-left: 12px; position: relative; }
 .graph-legend .graph-tooltip { left: 48px; min-height: 110px; max-height: 440px; display: flex; flex-direction: column; }
 .graph-legend .graph-tooltip ul { flex: 1; min-height: 0; overflow-y: auto; }
+.graph-legend-select-all {
+  padding-bottom: 6px; margin-bottom: 6px; border-bottom: 1px solid var(--border);
+}
+.graph-legend-show { margin-top: 4px; }
+.graph-legend-shown {
+  margin-top: 12px; border-top: 1px solid var(--border); padding-top: 8px;
+}
+.graph-legend-shown-header { display: flex; align-items: center; justify-content: space-between; }
+.graph-legend-shown ul {
+  list-style: none; margin: 8px 0 0; padding: 0;
+  max-height: 320px; overflow-y: auto; font-size: 0.85em;
+}
+.graph-legend-shown li { padding: 3px 0; border-bottom: 1px solid rgba(127, 127, 127, 0.15); }
 .graph-legend-row { display: flex; align-items: center; gap: 6px; cursor: pointer; margin-bottom: 6px; }
 .filter-bar {
   display: flex; flex-wrap: wrap; align-items: center; gap: 12px;
@@ -271,8 +289,6 @@ button { cursor: pointer; }
   gap: 1.25rem;
   margin-top: 1.1rem;
   padding: 1.1rem 1.1rem 1.2rem;
-  border-radius: 8px;
-  background: rgba(127, 127, 127, 0.13);
 }
 
 /* Part 2 is a different kind of thing from the panel above it -- hand-entered
@@ -280,8 +296,6 @@ button { cursor: pointer; }
 .external-costs {
   margin-top: 1.75rem;
   padding: 1rem 1.1rem 1.2rem;
-  border-radius: 8px;
-  background: rgba(127, 127, 127, 0.13);
 }
 .external-costs > .external-costs-header { margin-bottom: 0.6rem; }
 .external-costs h3 { margin: 0; }

@@ -55,7 +55,7 @@ export default function CostView() {
 
   return (
     <div className="cost-view">
-      <section className="hermes-usage cost-divider">
+      <section className="hermes-usage panel-surface cost-divider">
         <div className="cost-range">
           {RANGES.map(({ days: d, label }) => (
             <button key={d} className={days === d ? 'active' : ''} onClick={() => setDays(d)}>

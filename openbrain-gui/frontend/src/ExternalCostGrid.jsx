@@ -107,7 +107,7 @@ export default function ExternalCostGrid({ onTotalsChange }) {
   }
 
   return (
-    <section className="external-costs cost-divider">
+    <section className="external-costs panel-surface cost-divider">
       <div className="external-costs-header">
         <h3>External costs</h3>
         <div className="fx-control">
