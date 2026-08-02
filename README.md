@@ -24,7 +24,7 @@ infrastructure you already own.
 | 5 | Wire Hermes-Agent to call `openbrain-mcp` | ✅ Done |
 | 6 | Connect Claude Desktop / Claude Code | ✅ Done |
 | 7 | End-to-end acceptance on the real stack | ✅ Done |
-| 8 | Cost & token usage page — see [`costpage.md`](costpage.md) | ✅ Live 2026-07-31 |
+| 8 | Cost & token usage page — see [`costpage.md`](costpage.md) | ✅ Live 2026-07-31, saved reports added 2026-08-02 |
 
 Full details, every design decision, and a running log of bugs found/fixed during implementation:
 - Design spec — [`docs/superpowers/specs/2026-06-30-hermes-openbrain-memory-design.md`](docs/superpowers/specs/2026-06-30-hermes-openbrain-memory-design.md)
@@ -167,9 +167,10 @@ openbrain-gui/                # Phase 1 web GUI — see its own section below
       ledger_store.py                       # 5-min poller: lifetime counters -> daily deltas
       external_costs_store.py                # the cost spreadsheet: CRUD, period + currency maths
       fx.py                                   # USD->EUR rate (frankfurter.app / manual)
-      routes.py                                # the /api/* FastAPI routes
-      main.py                                   # app factory, ledger poller, static frontend mount
-    tests/                                       # 162 tests, pytest
+      cost_reports_store.py                    # save/load cost-report snapshots (JSON blob per name)
+      routes.py                                 # the /api/* FastAPI routes
+      main.py                                    # app factory, ledger poller, static frontend mount
+    tests/                                       # 177 tests, pytest
     pyproject.toml
   frontend/
     src/                                        # React components (Vite, plain JS/JSX, no TS)
@@ -419,9 +420,9 @@ The Cost page (below) works locally without a VPS: its Part 2 spreadsheet needs 
 
 ## Cost & token usage page
 
-A **`Cost`** button next to "Show keyword graph" opens a page reporting where Hermes' tokens and
-dollars actually go, plus a spreadsheet for external costs (VPS, Anthropic invoice, …) combined
-into one monthly total. **Live since 2026-07-31.**
+A **`Show cost report`** button next to "Show keyword graph" opens a page reporting where Hermes'
+tokens and dollars actually go, plus a spreadsheet for external costs (VPS, Anthropic invoice, …)
+combined into one monthly total. **Live since 2026-07-31.**
 
 **Full documentation: [`costpage.md`](costpage.md)** — how to read the numbers, the honest limits
 of the underlying data, the API, and operations.
@@ -432,10 +433,14 @@ In short:
   of ownership, per-model/platform/session breakdowns, a session drill-down showing the actual
   system prompt and compression state, token composition, per-call efficiency figures, top tools,
   prompt budget, and the cost-relevant `config.yaml` knobs (via a strict per-key whitelist, so no
-  credentials can leak).
+  credentials can leak). A range selector (Today/7/30/90 days) drives all of it.
 - **Part 2** is an editable grid: Name, Period (yearly/monthly/onetime/none), `$`/`€` with ECB
   rate refresh, billing URL, comments. Flag one row as your real Anthropic invoice and the page
   shows it against Hermes' own estimate.
+- **Save report / Load stored report** (added 2026-08-02) snapshot Part 1 into `gui.db` under a
+  deterministic name (`CostReport_07_26.07.2026-02.08.2026`, …) and can reload it later in place,
+  with a "back to live" banner — comparing two ranges just means loading each in its own browser
+  window. Details in `costpage.md`.
 
 Three data facts shape the design, and the page states each rather than hiding it: Hermes stores
 **lifetime totals per session** (so a 5-minute poller samples deltas into `gui.db` to build a real
