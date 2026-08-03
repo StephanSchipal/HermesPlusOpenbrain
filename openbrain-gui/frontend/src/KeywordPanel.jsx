@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { api } from './api.js'
 
-export default function KeywordPanel({ onKeywordClick }) {
+export default function KeywordPanel({ onKeywordClick, onCountChange }) {
   const [filter, setFilter] = useState('')
   const [keywords, setKeywords] = useState([])
   const [error, setError] = useState(null)
@@ -15,11 +15,12 @@ export default function KeywordPanel({ onKeywordClick }) {
     return () => clearTimeout(timer)
   }, [filter])
 
+  // Reported up rather than rendered here -- the count sits next to the
+  // capture stats line above this panel, not inside it (see App.jsx).
+  useEffect(() => { onCountChange?.(keywords.length) }, [keywords, onCountChange])
+
   return (
     <div className="keyword-panel">
-      <p className="stats-line keyword-count">
-        {keywords.length} keyword{keywords.length === 1 ? '' : 's'}
-      </p>
       <input
         className="keyword-filter"
         placeholder="Filter keywords…"

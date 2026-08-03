@@ -24,6 +24,13 @@ body {
    against the plain page background. */
 .panel-surface { border-radius: 8px; background: rgba(127, 127, 127, 0.13); }
 .capture-panel { margin: 0.75rem 0 1rem; padding: 1rem 1.1rem 1.2rem; }
+/* Puts the capture-stats line and the keyword count on one row, at the same
+   height, so the columns below (prompt vs. keyword panel) start level with
+   each other instead of the keyword column being pushed down by its own
+   separate count line. margin-left:auto on the count (not justify-content
+   on the row) keeps it pinned right even on the brief first render where
+   the stats line hasn't loaded yet and isn't there to space against. */
+.panel-header-row { display: flex; align-items: baseline; gap: 1rem; }
 .theme-toggle {
   background: none; border: 1px solid var(--border); border-radius: 4px;
   padding: 4px 8px; cursor: pointer;
@@ -77,9 +84,15 @@ body {
 }
 .textarea-clear:hover { opacity: 1; }
 .keyword-panel { flex: 1; display: flex; flex-direction: column; gap: 6px; }
-.keyword-count { margin: 0; }
+.keyword-count { margin: 0 0 0 auto; }
+/* Fixed max-height, deliberately not flex:1 -- flex:1 here previously made
+   this ballast the whole .keyword-panel/.top-row open instead of scrolling,
+   since a flex item's default min-height:auto lets its content's intrinsic
+   size dominate an auto-height ancestor reached only via align-items:stretch.
+   Bumped from the original 165px so the list reaches down toward the
+   prompt-column's button row instead of leaving empty panel space below it. */
 .keyword-list {
-  max-height: 165px; overflow-y: auto; display: flex; flex-wrap: wrap;
+  max-height: 320px; overflow-y: auto; display: flex; flex-wrap: wrap;
   gap: 4px; align-content: flex-start;
 }
 .keyword-chip {

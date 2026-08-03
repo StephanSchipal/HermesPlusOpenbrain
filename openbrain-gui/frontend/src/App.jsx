@@ -16,6 +16,9 @@ const SEARCH_PAGE_SIZE = 25
 
 export default function App() {
   const [stats, setStats] = useState(null)
+  // Owned here (not inside KeywordPanel) so it can sit on the same row as the
+  // capture stats line, rather than stacked inside the keyword column below it.
+  const [keywordCount, setKeywordCount] = useState(0)
   const [prompt, setPrompt] = useState('')
   const [savedPrompts, setSavedPrompts] = useState([])
   const [selectedPromptId, setSelectedPromptId] = useState('')
@@ -256,14 +259,19 @@ export default function App() {
       {notice && <p className="notice-banner">{notice}</p>}
 
       <section className="capture-panel panel-surface">
-        {stats && (
-          <p className="stats-line">
-            {stats.total} captures ·{' '}
-            {Object.entries(stats.by_source).map(([src, n]) => `${src}: ${n}`).join(', ')}
-            {stats.first_capture && ` · first: ${formatDateTime(stats.first_capture)}`}
-            {stats.last_capture && ` · last: ${formatDateTime(stats.last_capture)}`}
+        <div className="panel-header-row">
+          {stats && (
+            <p className="stats-line">
+              {stats.total} captures ·{' '}
+              {Object.entries(stats.by_source).map(([src, n]) => `${src}: ${n}`).join(', ')}
+              {stats.first_capture && ` · first: ${formatDateTime(stats.first_capture)}`}
+              {stats.last_capture && ` · last: ${formatDateTime(stats.last_capture)}`}
+            </p>
+          )}
+          <p className="stats-line keyword-count">
+            {keywordCount} keyword{keywordCount === 1 ? '' : 's'}
           </p>
-        )}
+        </div>
 
         <div className="top-row">
           <div className="prompt-column">
@@ -291,7 +299,7 @@ export default function App() {
               </button>
             </div>
           </div>
-          <KeywordPanel onKeywordClick={handleKeywordClick} />
+          <KeywordPanel onKeywordClick={handleKeywordClick} onCountChange={setKeywordCount} />
         </div>
 
         <div className="grid-actions">
