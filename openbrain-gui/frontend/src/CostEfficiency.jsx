@@ -1,4 +1,6 @@
+import { useState } from 'react'
 import { usd, tokens } from './format'
+import TokenTypesExplainPopup from './TokenTypesExplainPopup'
 
 const SEGMENTS = [
   { key: 'cache_read_tokens', label: 'cache read', color: '#76b7b2' },
@@ -34,20 +36,23 @@ function Composition({ hermes }) {
           </span>
         ))}
       </div>
-      <p className="cost-note">
-        A cache <strong>write</strong> costs 12.5× a cache read — the red segment is where the
-        money goes, not the green one.
-      </p>
     </>
   )
 }
 
 export default function CostEfficiency({ hermes, efficiency }) {
+  const [explaining, setExplaining] = useState(false)
+
   return (
     <div className="cost-efficiency">
       <section className="cost-table-block">
-        <h4>Token composition</h4>
+        <h4>
+          Token composition
+          <button type="button" className="explain-button" onClick={() => setExplaining(true)}
+                  title="What do these token types mean, and what do they cost?">?</button>
+        </h4>
         {hermes ? <Composition hermes={hermes} /> : <p className="cost-loading">Loading…</p>}
+        {explaining && <TokenTypesExplainPopup onClose={() => setExplaining(false)} />}
       </section>
 
       <section className="cost-table-block">

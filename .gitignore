@@ -8,6 +8,7 @@
 *.secret
 *secret*
 *token*
+!openbrain-gui/frontend/src/TokenTypesExplainPopup.jsx
 secrets/
 
 # Python

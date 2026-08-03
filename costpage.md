@@ -75,6 +75,10 @@ exists.
 
 ### 2.2 Cache writes are where the money goes
 
+Also available in the app: the **?** button next to "Token composition" opens this same
+explanation, plus what input/output/cache-read/cache-write tokens actually are. Keep the two in
+sync — `TokenTypesExplainPopup.jsx` mirrors this section.
+
 A cache **write** costs 12.5× a cache **read**. A high cache hit rate is good news, but it is not
 the whole story — the **cache-write per call** column in the Efficiency panel is the number that
 actually tracks your bill.

@@ -17,6 +17,9 @@ export default function KeywordPanel({ onKeywordClick }) {
 
   return (
     <div className="keyword-panel">
+      <p className="stats-line keyword-count">
+        {keywords.length} keyword{keywords.length === 1 ? '' : 's'}
+      </p>
       <input
         className="keyword-filter"
         placeholder="Filter keywords…"
