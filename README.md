@@ -459,6 +459,36 @@ plan — [`docs/superpowers/plans/2026-07-31-openbrain-gui-cost-page.md`](docs/s
 A follow-up **Spec B** (action buttons via a whitelisted command bridge, and a switchable
 per-request logger) is designed but not built — see `costpage.md` §7.
 
+## Related: Hermes cost tuning (2026-08-14)
+
+Two production settings on Hermes-Agent's own `config.yaml`
+(`/docker/hermes-agent-7qpk/data/config.yaml` on the VPS — not part of this repo) were changed
+after the cost page's data pointed at the actual cost driver: WhatsApp was 62% of spend
+(`$58.78`/30d, see `costpage.md` §2.2), driven by cache-**write** frequency, not prompt size.
+
+- **`prompt_caching.cache_ttl`: `5m` → `1h`.** Anthropic only honors `"5m"`/`"1h"` for this
+  setting (any other value is silently ignored). A 5-minute TTL suits CLI/TUI's rapid back-to-back
+  turns, but is wrong for WhatsApp's human-paced replies — a gap over 5 minutes forces a full
+  (12.5× a cache-read) cache-write on the next message instead of a cheap read. `1h` is the tier
+  Hermes documents for "long-running sessions where the user takes breaks between turns."
+- **`compression.threshold`: `0.5` → `0.2`.** Root cause found by Hermes itself: one WhatsApp DM
+  session (`20260725_065112_6ef40f7a`) had been reused continuously for 3 weeks — Hermes has no
+  automatic reset for WhatsApp sessions, only a manual `/new`. With Sonnet 5's 1M-token context
+  window, the 50% threshold meant compaction fired only once (2,422 messages, 7 Aug) before the
+  session resumed growing — ~97.7M cumulative cache-read tokens over 481 calls by the time this was
+  found. Lowering the threshold caps growth much sooner. This applies globally, not just to
+  WhatsApp — Hermes has no per-platform config profile yet (`hermes profile list` shows only
+  `default`).
+- **New weekly reminder cron**, native to Hermes (`hermes cron create`, job
+  `weekly-whatsapp-session-reset-reminder`, Mondays 09:00 UTC, `--no-agent` mode — script stdout is
+  delivered directly with no LLM call, so the reminder itself costs nothing): sends a WhatsApp
+  message asking for `/new`. The reset itself still needs that manual tap — forcing a session
+  rotation from the CLI/cron side wasn't attempted, since it's unverified whether the WhatsApp
+  gateway would actually open a fresh session afterward rather than resuming the same one.
+
+No changes to this repo — both settings and the cron job live entirely in Hermes' own VPS data
+directory, outside anything `HermesPlusOpenbrain` deploys or owns.
+
 ## Related: Laptop-Dateizugriff via Tailscale
 
 Ein weiterer, unabhängiger Baustein auf demselben Hermes-Agent: kontrollierter Lese-/Schreibzugriff
