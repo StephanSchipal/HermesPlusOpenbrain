@@ -132,9 +132,10 @@ Implemented in [`openbrain-mcp/app/server.py`](openbrain-mcp/app/server.py), del
 | `classify_captures(categories, ids?)` | Read-only. Classifies captures into caller-supplied `{name, example}` categories by embedding similarity (zero-shot, no pre-labeled data needed), returning each capture's assigned `category` and a similarity `score`. Omit `ids` to classify everything. Persist a result via the existing `update` tool if desired — this tool writes nothing itself. |
 | `list_keywords()` | Read-only. Lists every distinct keyword across all captures with its frequency, most-frequent first (aggregated case-insensitively). Powers the OpenBrain GUI's keyword panel. |
 
-All except `save`/`update`'s pass-through of `metadata` are exercised by the test suite
-(`openbrain-mcp/tests/`, 57 tests, mostly run against a real Postgres+pgvector instance;
-`compute_fingerprint`'s tests are the exception and need no database).
+All of these are exercised by the test suite (`openbrain-mcp/tests/`, 64 tests, mostly run
+against a real Postgres+pgvector instance; `compute_fingerprint`'s tests are the exception and
+need no database). `metadata` round-trips: `save`/`update` persist it, `search`/`list_recent`
+return it (only when non-empty), and `update` shallow-merges rather than replacing it.
 
 ## Repository layout
 
@@ -149,7 +150,7 @@ openbrain-mcp/
     store.py            # save/search/recent/stats/delete/update/find_near_duplicates/cluster_captures/classify_captures/list_keywords — the only file with SQL
     server.py             # the 11 MCP tools + bearer auth + /health
   migrations/001_init.sql   # schema
-  tests/                     # 57 tests, pytest
+  tests/                     # 64 tests, pytest
   Dockerfile
   pyproject.toml
 openbrain-gui/                # Phase 1 web GUI — see its own section below
@@ -523,3 +524,12 @@ existing Docker-label-based routes — the live Hermes/WhatsApp container was ne
 rebuilt to wire this up, and the existing Let's Encrypt certificate volume was preserved across
 the Traefik recreate. Every inbound Twilio webhook is validated via `X-Twilio-Signature`; Twilio
 credentials live only in `~/.hermes/.env` (mode `600`), never in code or docs.
+
+## License
+
+The code in this repository is released under the [MIT License](LICENSE) — free to use, modify,
+and redistribute with attribution.
+
+The scope is the code only. `Openbrain.pdf` and `Openskills.pdf` are third-party reference
+material included for context and are not covered by that license; third-party dependencies keep
+their own licenses.

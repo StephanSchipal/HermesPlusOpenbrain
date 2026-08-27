@@ -62,7 +62,10 @@ def list_recent(n: int = 10, source: str | None = None, date_from: str | None = 
 
     ids: fetch exactly these capture ids (combinable with the other filters),
     e.g. to resolve a set of ids gathered elsewhere into full rows -- ignores
-    `n`, returns all matching ids rather than truncating to a page size."""
+    `n`, returns all matching ids rather than truncating to a page size. This
+    is also the way to fetch a full record (including its `metadata`) by id --
+    there is no separate get-by-id tool. Each result carries a `metadata` key
+    only when that capture has non-empty metadata."""
     with get_conn() as conn:
         return store.fetch_recent(
             conn, n=n, source=source, date_from=date_from, date_to=date_to,
@@ -84,8 +87,12 @@ def delete(id: str) -> dict:
 @mcp.tool()
 def update(id: str, summary: str | None = None, raw_text: str | None = None,
            keywords: list[str] | None = None, metadata: dict | None = None) -> dict:
-    """Edit a capture: change its summary, raw_text, and/or keywords (re-embeds
-    if summary changes; raw_text is reference-only, no re-embed/dedup effect)."""
+    """Edit a capture: change its summary, raw_text, keywords and/or metadata
+    (re-embeds if summary changes; raw_text is reference-only, no re-embed/dedup
+    effect). `metadata` is shallow-merged into the capture's existing metadata,
+    not replaced -- passing {"b": 2} keeps any other keys already there; a
+    repeated key is overwritten at the top level. There is no way to delete a
+    metadata key here."""
     with get_conn() as conn:
         return {"id": id, "updated": store.update_capture(
             conn, capture_id=id, summary=summary, raw_text=raw_text,
@@ -127,9 +134,9 @@ def classify_captures(categories: list[dict], ids: list[str] | None = None) -> l
     similarity. Each category is {"name": str, "example": str} -- an empty
     `categories` list returns {"error": ...} instead of raising. Read-only:
     does not persist the result. To keep a classification, call
-    `update(id, metadata={"category": ...})` separately -- note that
-    `update`'s metadata is a full replace, not a merge, so this will
-    overwrite any existing metadata on that capture. Omit `ids` to
+    `update(id, metadata={"category": ...})` separately -- `update` shallow-
+    merges metadata, so this sets/overwrites just the "category" key and
+    leaves any other metadata on that capture intact. Omit `ids` to
     classify every capture, or pass specific ids to classify only those --
     returns [] if none match."""
     with get_conn() as conn:

@@ -609,3 +609,65 @@ def test_fetch_recent_still_orders_by_created_at_desc_with_filters():
     with get_conn() as conn:
         results = store.fetch_recent(conn, n=10, source="other")
     assert [r["id"] for r in results] == [r2["id"], r1["id"]]  # newest first
+
+def test_save_persists_metadata_and_search_returns_it():
+    _clean()
+    with get_conn() as conn:
+        store.save_capture(conn, raw_text="a", summary="a note about tax planning",
+                           keywords=["tax"], source="other",
+                           metadata={"category": "finance", "reviewed": True})
+    with get_conn() as conn:
+        hits = store.search_captures(conn, query="notes about taxes", k=1)
+    assert hits and hits[0].get("metadata") == {"category": "finance", "reviewed": True}
+
+def test_metadata_key_present_only_when_non_empty():
+    # The read path adds a "metadata" key only when the stored dict is
+    # non-empty -- a capture saved without metadata carries no extra payload
+    # (matches this project's per-row token-cost sensitivity).
+    _clean()
+    with get_conn() as conn:
+        r_with = store.save_capture(conn, raw_text="a", summary="a note about tax planning",
+                                    keywords=["tax"], source="other",
+                                    metadata={"category": "finance"})
+        r_without = store.save_capture(conn, raw_text="b", summary="a note about garden tools",
+                                       keywords=["garden"], source="other")
+    with get_conn() as conn:
+        rows = {row["id"]: row for row in store.fetch_recent(conn, n=10)}
+    assert rows[r_with["id"]].get("metadata") == {"category": "finance"}
+    assert "metadata" not in rows[r_without["id"]]
+
+def test_fetch_recent_by_ids_returns_metadata():
+    # list_recent(ids=[...]) is the de-facto "fetch full record by id" path;
+    # it must surface metadata.
+    _clean()
+    with get_conn() as conn:
+        r = store.save_capture(conn, raw_text="a", summary="a note about tax planning",
+                               keywords=["tax"], source="other",
+                               metadata={"category": "finance"})
+    with get_conn() as conn:
+        rows = store.fetch_recent(conn, ids=[r["id"]])
+    assert len(rows) == 1
+    assert rows[0].get("metadata") == {"category": "finance"}
+
+def test_update_merges_metadata_instead_of_replacing():
+    _clean()
+    with get_conn() as conn:
+        r = store.save_capture(conn, raw_text="a", summary="a note about tax planning",
+                               keywords=["tax"], source="other",
+                               metadata={"category": "finance"})
+        ok = store.update_capture(conn, capture_id=r["id"], metadata={"reviewed": True})
+    assert ok is True
+    with get_conn() as conn:
+        rows = store.fetch_recent(conn, ids=[r["id"]])
+    assert rows[0].get("metadata") == {"category": "finance", "reviewed": True}
+
+def test_update_metadata_overwrites_same_key_shallowly():
+    _clean()
+    with get_conn() as conn:
+        r = store.save_capture(conn, raw_text="a", summary="a note about tax planning",
+                               keywords=["tax"], source="other",
+                               metadata={"category": "finance", "reviewed": False})
+        store.update_capture(conn, capture_id=r["id"], metadata={"category": "legal"})
+    with get_conn() as conn:
+        rows = store.fetch_recent(conn, ids=[r["id"]])
+    assert rows[0].get("metadata") == {"category": "legal", "reviewed": False}

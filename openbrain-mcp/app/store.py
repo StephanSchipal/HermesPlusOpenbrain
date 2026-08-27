@@ -93,7 +93,7 @@ def search_captures(conn: psycopg.Connection, *, query: str | None = None,
         cur.execute(
             f"""
             SELECT id, summary, raw_text, keywords, source, source_url, lang, created_at,
-                   1 - (embedding <=> %s::vector) AS score
+                   1 - (embedding <=> %s::vector) AS score, metadata
             FROM captures
             {where_sql}
             ORDER BY embedding <=> %s::vector
@@ -304,7 +304,8 @@ def fetch_recent(conn: psycopg.Connection, *, n: int = 10, source: str | None = 
     with conn.cursor() as cur:
         cur.execute(
             f"""
-            SELECT id, summary, raw_text, keywords, source, source_url, lang, created_at, NULL::float
+            SELECT id, summary, raw_text, keywords, source, source_url, lang, created_at,
+                   NULL::float, metadata
             FROM captures
             {where_sql}
             ORDER BY created_at DESC
@@ -346,7 +347,13 @@ def update_capture(conn: psycopg.Connection, *, capture_id: str,
     """Update given fields; re-embed when summary changes; bump updated_at.
     raw_text is reference-only (not embedded, doesn't affect the fingerprint
     since that's keyed on source_url when present) -- changing it never
-    re-embeds or affects dedup."""
+    re-embeds or affects dedup.
+
+    metadata is shallow-merged into the existing jsonb (Postgres `||`), not
+    replaced: update(metadata={"b": 2}) on a capture holding {"a": 1} yields
+    {"a": 1, "b": 2}, and a repeated key overwrites at the top level only.
+    Passing metadata={} is a no-op on content. There is no way to delete a
+    metadata key through this function."""
     sets: list[str] = []
     params: list = []
     if summary is not None:
@@ -359,7 +366,7 @@ def update_capture(conn: psycopg.Connection, *, capture_id: str,
         sets.append("keywords = %s")
         params.append(normalize_keywords(keywords))
     if metadata is not None:
-        sets.append("metadata = %s")
+        sets.append("metadata = metadata || %s::jsonb")  # shallow merge, not replace
         params.append(Json(metadata))
     if not sets:
         return False
@@ -373,7 +380,7 @@ def update_capture(conn: psycopg.Connection, *, capture_id: str,
     return updated
 
 def _row_to_result(r) -> dict:
-    return {
+    result = {
         "id": str(r[0]),
         "summary": r[1],
         "raw_text": r[2],
@@ -384,3 +391,8 @@ def _row_to_result(r) -> dict:
         "created_at": r[7].isoformat() if r[7] else None,
         "score": float(r[8]) if r[8] is not None else None,
     }
+    # metadata (r[9]) is included only when non-empty: a capture saved without
+    # metadata adds no key here, keeping the common result row minimal.
+    if r[9]:
+        result["metadata"] = r[9]
+    return result
