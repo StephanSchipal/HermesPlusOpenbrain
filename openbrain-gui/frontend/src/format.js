@@ -42,11 +42,12 @@ export function dateRangeLabel(days, isToday) {
 }
 
 // Same date math as dateRangeLabel, formatted for a filename: no spaces
-// around the dash, and the day count zero-padded into the name so reports
-// for different ranges sort and scan together, e.g. CostReport_07_20.06.2026-27.06.2026.
-export function reportName(days, isToday) {
+// around the dash, the profile key up front, and the day count zero-padded
+// into the name so reports for one bot and range sort and scan together,
+// e.g. CostReport_all_07_20.06.2026-27.06.2026.
+export function reportName(days, isToday, profile = 'all') {
   const { start, end } = rangeDates(days)
   const code = String(days).padStart(2, '0')
   const datePart = isToday ? ddmmyyyy(end) : `${ddmmyyyy(start)}-${ddmmyyyy(end)}`
-  return `CostReport_${code}_${datePart}`
+  return `CostReport_${profile}_${code}_${datePart}`
 }

@@ -45,11 +45,17 @@ export const api = {
   refreshFx: () => request('/cost/fx/refresh', { method: 'POST' }),
   setFx: (usd_to_eur) =>
     request('/cost/fx', { method: 'PUT', body: JSON.stringify({ usd_to_eur }) }),
-  getCostDashboard: (days, limit = 50) => request(`/cost/dashboard?days=${days}&limit=${limit}`),
-  getCostSummary: (days) => request(`/cost/summary?days=${days}`),
-  getCostSession: (id) => request(`/cost/session/${encodeURIComponent(id)}`),
-  getCostConfig: () => request('/cost/config'),
-  getCostTimeseries: (days, group) => request(`/cost/timeseries?days=${days}&group=${group}`),
+  getCostProfiles: () => request('/cost/profiles'),
+  getCostByBot: (days) => request(`/cost/by-bot?days=${days}`),
+  getCostDashboard: (days, limit = 50, profile = 'all') =>
+    request(`/cost/dashboard?days=${days}&limit=${limit}&profile=${profile}`),
+  getCostSummary: (days, profile = 'all') =>
+    request(`/cost/summary?days=${days}&profile=${profile}`),
+  getCostSession: (id, profile) =>
+    request(`/cost/session/${encodeURIComponent(id)}?profile=${encodeURIComponent(profile)}`),
+  getCostConfig: (profile = 'all') => request(`/cost/config?profile=${profile}`),
+  getCostTimeseries: (days, group, profile = 'all') =>
+    request(`/cost/timeseries?days=${days}&group=${group}&profile=${profile}`),
   listCostReports: () => request('/cost/reports'),
   getCostReport: (name) => request(`/cost/reports/${encodeURIComponent(name)}`),
   saveCostReport: (name, body) =>

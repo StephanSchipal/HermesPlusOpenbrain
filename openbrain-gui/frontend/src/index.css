@@ -233,6 +233,11 @@ button { cursor: pointer; }
    a <span>, not a <button>, so it doesn't pick up the browser's UA button
    font through inheritance; copy the same value explicitly instead. */
 .cost-range-label { font: 13.3333px Arial, sans-serif; margin-left: 0.25rem; }
+.cost-profile {
+  margin-left: 0.5rem;
+  background: var(--bg); color: var(--fg);
+  border: 1px solid var(--border); border-radius: 4px; padding: 2px 4px;
+}
 .cost-external-total { margin: 0; opacity: 0.85; }
 .cost-warning { color: #c0392b; }
 

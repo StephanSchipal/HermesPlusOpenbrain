@@ -3,7 +3,7 @@ import { usd, tokens } from './format'
 const SUM_KEYS = ['sessions', 'api_calls', 'input_tokens', 'output_tokens',
                    'cache_read_tokens', 'cache_write_tokens', 'cost_usd']
 
-function Table({ title, rows, labelKey, labelHeader, onRowClick }) {
+function Table({ title, rows, labelKey, labelHeader, onRowClick, botColumn }) {
   const total = rows.reduce((sum, r) => sum + (r.cost_usd || 0), 0)
 
   // A pruned session keeps its spend but loses its sessions-table row, so
@@ -25,6 +25,7 @@ function Table({ title, rows, labelKey, labelHeader, onRowClick }) {
       <table className="cost-table">
         <thead>
           <tr>
+            {botColumn && <th>Bot</th>}
             <th>{labelHeader}</th><th>Sessions</th><th>Calls</th>
             <th>In</th><th>Out</th><th>Cache read</th><th>Cache write</th>
             <th>Cost</th><th>%</th>
@@ -37,6 +38,7 @@ function Table({ title, rows, labelKey, labelHeader, onRowClick }) {
             <tr key={r.session_id ?? r[labelKey] ?? i}
                 className={clickable ? 'clickable' : ''}
                 onClick={clickable ? () => onRowClick(r) : undefined}>
+              {botColumn && <td>{r.profile || '—'}</td>}
               <td>{r[labelKey] || <em className="cost-note">(pruned {r._prunedCount})</em>}</td>
               <td>{r.sessions}</td>
               <td>{r.api_calls}</td>
@@ -55,13 +57,14 @@ function Table({ title, rows, labelKey, labelHeader, onRowClick }) {
   )
 }
 
-export default function CostTables({ byModel, byPlatform, bySession, onSelectSession }) {
+export default function CostTables({ byModel, byPlatform, bySession, profile, onSelectSession }) {
   return (
     <div className="cost-tables">
       <Table title="By model" rows={byModel || []} labelKey="model" labelHeader="Model" />
       <Table title="By platform" rows={byPlatform || []} labelKey="platform" labelHeader="Platform" />
       <Table title="Top spenders" rows={bySession || []} labelKey="title" labelHeader="Session"
-             onRowClick={(r) => onSelectSession(r.session_id)} />
+             botColumn={profile === 'all'}
+             onRowClick={(r) => onSelectSession({ id: r.session_id, profile: r.profile || profile })} />
     </div>
   )
 }
