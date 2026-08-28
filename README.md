@@ -525,6 +525,21 @@ rebuilt to wire this up, and the existing Let's Encrypt certificate volume was p
 the Traefik recreate. Every inbound Twilio webhook is validated via `X-Twilio-Signature`; Twilio
 credentials live only in `~/.hermes/.env` (mode `600`), never in code or docs.
 
+## Related: OpenBrain WhatsApp bot (`openbrain` profile)
+
+WhatsApp now runs on a dedicated Hermes profile, **`openbrain`** — a clone of the main
+`default` profile with the `laptop_fs` MCP removed — so it can be tuned down independently
+(prune skills, swap model) without touching voice or CLI. `default` keeps Twilio voice, the
+CLI, `laptop_fs`, and the `openbrain` MCP for laptop/desktop recall; it just no longer serves
+WhatsApp. The Hostinger image supervises one gateway per profile (s6 + a boot-time reconciler),
+so the second gateway needs no watchdog and survives container recreates and image updates.
+
+> Status: **Live** (since 2026-08-28)
+
+Full details, including the one-profile-per-WhatsApp constraint, the per-profile `api_server`
+port requirement, the cutover steps, and how to reverse it:
+[`CaptureBotDocu.md`](CaptureBotDocu.md).
+
 ## License
 
 The code in this repository is released under the [MIT License](LICENSE) — free to use, modify,
