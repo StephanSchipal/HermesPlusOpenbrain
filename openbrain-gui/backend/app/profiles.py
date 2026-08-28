@@ -23,7 +23,9 @@ def list_profiles() -> list[dict]:
         out.append({"key": _ROOT_KEY, "label": _ROOT_LABEL, "data_dir": str(root)})
     profiles_dir = root / "profiles"
     if profiles_dir.is_dir():
-        for child in sorted(profiles_dir.iterdir()):
+        for child in sorted(profiles_dir.iterdir(), key=lambda p: p.name):
+            if child.name in (_ROOT_KEY, "all"):
+                continue
             if child.is_dir() and (child / "state.db").is_file():
                 out.append({"key": child.name, "label": child.name,
                             "data_dir": str(child)})

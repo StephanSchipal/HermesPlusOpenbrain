@@ -31,6 +31,16 @@ def test_profile_dir_without_statedb_is_excluded(tmp_path, monkeypatch):
     assert [p["key"] for p in profiles.list_profiles()] == ["default"]
 
 
+def test_reserved_names_excluded(tmp_path, monkeypatch):
+    monkeypatch.setattr(profiles, "HERMES_DATA_DIR", str(tmp_path))
+    _mk_statedb(tmp_path)
+    _mk_statedb(tmp_path / "profiles" / "default")
+    _mk_statedb(tmp_path / "profiles" / "all")
+    _mk_statedb(tmp_path / "profiles" / "coder")
+    keys = [p["key"] for p in profiles.list_profiles()]
+    assert keys == ["default", "coder"]
+
+
 def test_absent_mount_returns_empty(tmp_path, monkeypatch):
     monkeypatch.setattr(profiles, "HERMES_DATA_DIR", str(tmp_path / "nope"))
     assert profiles.list_profiles() == []
