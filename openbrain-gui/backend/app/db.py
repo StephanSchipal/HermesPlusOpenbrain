@@ -47,6 +47,7 @@ CREATE TABLE IF NOT EXISTS usage_ledger (
     observed_at   TEXT    NOT NULL,
     session_id    TEXT    NOT NULL,
     model         TEXT    NOT NULL,
+    profile       TEXT    NOT NULL DEFAULT 'default',
     -- Denormalised from sessions.source at write time. The chart must be able
     -- to group by platform without /hermes-data being mounted at read time.
     platform      TEXT    NOT NULL DEFAULT '',
@@ -63,6 +64,7 @@ CREATE TABLE IF NOT EXISTS usage_ledger (
 CREATE INDEX IF NOT EXISTS idx_usage_ledger_observed ON usage_ledger(observed_at);
 
 CREATE TABLE IF NOT EXISTS usage_watermark (
+    profile            TEXT NOT NULL DEFAULT 'default',
     session_id         TEXT NOT NULL,
     model              TEXT NOT NULL,
     task               TEXT NOT NULL DEFAULT '',
@@ -73,7 +75,7 @@ CREATE TABLE IF NOT EXISTS usage_watermark (
     cache_write_tokens INTEGER NOT NULL DEFAULT 0,
     reasoning_tokens   INTEGER NOT NULL DEFAULT 0,
     estimated_cost_usd REAL    NOT NULL DEFAULT 0,
-    PRIMARY KEY (session_id, model, task)
+    PRIMARY KEY (profile, session_id, model, task)
 );
 
 -- A saved point-in-time copy of the Part 1 dashboard (summary tiles, by-model/
@@ -100,7 +102,49 @@ def get_conn(path: str | None = None) -> Iterator[sqlite3.Connection]:
     finally:
         conn.close()
 
+
+def _table_columns(conn: sqlite3.Connection, table: str) -> list[str]:
+    return [r[1] for r in conn.execute(f"PRAGMA table_info({table})")]
+
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    """Bring a pre-per-profile gui.db up to the current schema. Idempotent:
+    each branch is guarded by a column-existence check, so it is a no-op on a
+    db that `_SCHEMA` already built with the final shape."""
+    if "profile" not in _table_columns(conn, "usage_ledger"):
+        conn.execute(
+            "ALTER TABLE usage_ledger ADD COLUMN profile TEXT NOT NULL DEFAULT 'default'"
+        )
+    if "profile" not in _table_columns(conn, "usage_watermark"):
+        conn.executescript("""
+            CREATE TABLE usage_watermark_new (
+                profile TEXT NOT NULL DEFAULT 'default',
+                session_id TEXT NOT NULL, model TEXT NOT NULL,
+                task TEXT NOT NULL DEFAULT '',
+                api_call_count INTEGER NOT NULL DEFAULT 0,
+                input_tokens INTEGER NOT NULL DEFAULT 0,
+                output_tokens INTEGER NOT NULL DEFAULT 0,
+                cache_read_tokens INTEGER NOT NULL DEFAULT 0,
+                cache_write_tokens INTEGER NOT NULL DEFAULT 0,
+                reasoning_tokens INTEGER NOT NULL DEFAULT 0,
+                estimated_cost_usd REAL NOT NULL DEFAULT 0,
+                PRIMARY KEY (profile, session_id, model, task)
+            );
+            INSERT INTO usage_watermark_new
+                (profile, session_id, model, task, api_call_count, input_tokens,
+                 output_tokens, cache_read_tokens, cache_write_tokens,
+                 reasoning_tokens, estimated_cost_usd)
+            SELECT 'default', session_id, model, task, api_call_count, input_tokens,
+                   output_tokens, cache_read_tokens, cache_write_tokens,
+                   reasoning_tokens, estimated_cost_usd
+            FROM usage_watermark;
+            DROP TABLE usage_watermark;
+            ALTER TABLE usage_watermark_new RENAME TO usage_watermark;
+        """)
+
+
 def init_db(path: str | None = None) -> None:
     with get_conn(path) as conn:
         conn.executescript(_SCHEMA)
+        _migrate(conn)
         conn.commit()
