@@ -18,9 +18,9 @@ _STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 async def _poll_forever() -> None:
     while True:
         # sqlite3 and the state.db file copy are both blocking, so keep them
-        # off the event loop -- a tick must never stall a request. run_once
+        # off the event loop -- a tick must never stall a request. run_all
         # never raises, so a bad tick cannot kill this loop either.
-        await asyncio.to_thread(ledger_store.run_once)
+        await asyncio.to_thread(ledger_store.run_all)
         await asyncio.sleep(LEDGER_POLL_SECONDS)
 
 @contextlib.asynccontextmanager
