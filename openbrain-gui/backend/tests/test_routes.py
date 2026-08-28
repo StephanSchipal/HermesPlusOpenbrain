@@ -457,6 +457,7 @@ def test_hermes_endpoints_return_503_when_data_dir_absent(client, monkeypatch, t
     monkeypatch.setattr(pr, "HERMES_DATA_DIR", missing)
     resp = client.get(endpoint)
     assert resp.status_code == 503
+    assert "no readable Hermes profile" in resp.json()["detail"]
 
 
 def test_cost_config_returns_empty_list_when_no_profile_readable(client, monkeypatch, tmp_path):
@@ -681,6 +682,8 @@ def test_session_route_requires_a_specific_profile(client, monkeypatch):
     monkeypatch.setattr(pr, "resolve", lambda k: "/hd" if k == "default" else None)
     monkeypatch.setattr(hu, "session_detail", lambda sid, *, data_dir=None, conn=None: {"id": sid})
     assert client.get("/api/cost/session/s1?profile=all").status_code == 400
+    # an omitted profile falls through to the same 400 (not FastAPI's 422)
+    assert client.get("/api/cost/session/s1").status_code == 400
     assert client.get("/api/cost/session/s1?profile=default").json()["id"] == "s1"
 
 
@@ -703,6 +706,9 @@ def test_summary_tco_is_fleetwide_regardless_of_profile(client, monkeypatch):
     assert all_body["total_cost_of_ownership_usd"] == one_body["total_cost_of_ownership_usd"]
     assert one_body["hermes_cost_usd_selected"] == pytest.approx(4.0)
     assert all_body["hermes_cost_usd_selected"] == pytest.approx(100.0)
+    assert all_body["profile"] == "all"
+    assert one_body["profile"] == "openbrain"
+    assert "skipped_profiles" in all_body
 
 
 def test_dashboard_all_passes_skipped_profiles_through(client, monkeypatch):

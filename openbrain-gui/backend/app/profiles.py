@@ -13,6 +13,10 @@ from app.config import HERMES_DATA_DIR
 _ROOT_KEY = "default"
 _ROOT_LABEL = "Hermes-Agent"
 
+# The Cost page's "every bot" sentinel -- a profile key that means "don't filter,
+# merge across all profiles". Routes compare `?profile=` against this.
+ALL = "all"
+
 
 def list_profiles() -> list[dict]:
     """[{key, label, data_dir}] -- root first, then named profiles alphabetically.
@@ -24,7 +28,7 @@ def list_profiles() -> list[dict]:
     profiles_dir = root / "profiles"
     if profiles_dir.is_dir():
         for child in sorted(profiles_dir.iterdir(), key=lambda p: p.name):
-            if child.name in (_ROOT_KEY, "all"):
+            if child.name in (_ROOT_KEY, ALL):
                 continue
             if child.is_dir() and (child / "state.db").is_file():
                 out.append({"key": child.name, "label": child.name,

@@ -294,14 +294,17 @@ def get_cost_by_bot(days: int = 30):
     return _hermes(cost_merge.per_bot_breakdown, days=days)
 
 @router.get("/cost/dashboard")
-def get_cost_dashboard(days: int = 30, limit: int = 50, profile: str = "all"):
-    if profile == "all":
+def get_cost_dashboard(days: int = 30, limit: int = 50, profile: str = profiles.ALL):
+    if profile == profiles.ALL:
         return _hermes(cost_merge.dashboard_all, days=days, limit=limit)
     return _hermes(hermes_usage.dashboard, data_dir=_profile_dir(profile), days=days, limit=limit)
 
 @router.get("/cost/session/{session_id}")
-def get_cost_session(session_id: str, profile: str = Query(...)):
-    if profile == "all":
+def get_cost_session(session_id: str, profile: str = profiles.ALL):
+    # `profile` is a plain `str` default (not Query(...)) so an omitted param
+    # falls through to this coherent 400 rather than FastAPI's verbose 422 --
+    # same house style as `group` on /cost/timeseries.
+    if profile == profiles.ALL:
         raise HTTPException(status_code=400,
                             detail="a specific profile is required for a session lookup")
     detail = _hermes(hermes_usage.session_detail, session_id, data_dir=_profile_dir(profile))
@@ -310,18 +313,20 @@ def get_cost_session(session_id: str, profile: str = Query(...)):
     return detail
 
 @router.get("/cost/config")
-def get_cost_config(profile: str = "all"):
-    if profile == "all":
+def get_cost_config(profile: str = profiles.ALL):
+    if profile == profiles.ALL:
         return _hermes(cost_merge.config_all)
     return _hermes(hermes_usage.config_snapshot, data_dir=_profile_dir(profile))
 
 @router.get("/cost/timeseries")
-def get_cost_timeseries(days: int = 30, group: str = "model", profile: str = "all"):
+def get_cost_timeseries(days: int = 30, group: str = "model", profile: str = profiles.ALL):
     # Reads gui.db, not state.db -- deliberately no _hermes() wrapper, so the
     # chart survives the mount being absent. `group` is annotated `str` rather
     # than Literal so a bad value gives a 400 with a plain `detail`, matching
     # every other /api/cost/* validation failure instead of FastAPI's 422.
-    # `profile="all"` means no filter (see ledger_store.timeseries).
+    # `profile="all"` means no filter (see ledger_store.timeseries). Unlike the
+    # state.db routes, an unknown profile key is NOT a 404 here -- there is no
+    # state.db to resolve, it just filters gui.db's ledger and yields no rows.
     try:
         return ledger_store.timeseries(days=days, group=group, profile=profile)
     except ValueError as exc:
@@ -345,10 +350,10 @@ def put_cost_report(name: str, body: CostReportSaveRequest):
     return cost_reports_store.save_report(name, body.days, body.range_label, body.payload)
 
 @router.get("/cost/summary")
-def get_cost_summary(days: int = 30, profile: str = "all"):
+def get_cost_summary(days: int = 30, profile: str = profiles.ALL):
     # Selected-profile figures drive the header tiles. "all" == the fleet sum,
     # so the selected summary and the fleet summary are the same object then.
-    if profile == "all":
+    if profile == profiles.ALL:
         selected = _hermes(cost_merge.summary_all, days=days)
         fleet = selected
     else:
