@@ -5,6 +5,10 @@ const SUM_KEYS = ['sessions', 'api_calls', 'input_tokens', 'output_tokens',
 
 function Table({ title, rows, labelKey, labelHeader, onRowClick, botColumn }) {
   const total = rows.reduce((sum, r) => sum + (r.cost_usd || 0), 0)
+  // Gate the Bot column on the data actually carrying `profile`, not just the
+  // caller's flag: a single-bot payload (or a pre-feature saved report) has no
+  // `profile` on its rows, so the column would be all "—".
+  const showBot = botColumn && rows.some((r) => r.profile)
 
   // A pruned session keeps its spend but loses its sessions-table row, so
   // there is no label and no drill-down to open. A long tail of these used to
@@ -25,7 +29,7 @@ function Table({ title, rows, labelKey, labelHeader, onRowClick, botColumn }) {
       <table className="cost-table">
         <thead>
           <tr>
-            {botColumn && <th>Bot</th>}
+            {showBot && <th>Bot</th>}
             <th>{labelHeader}</th><th>Sessions</th><th>Calls</th>
             <th>In</th><th>Out</th><th>Cache read</th><th>Cache write</th>
             <th>Cost</th><th>%</th>
@@ -38,7 +42,7 @@ function Table({ title, rows, labelKey, labelHeader, onRowClick, botColumn }) {
             <tr key={r.session_id ?? r[labelKey] ?? i}
                 className={clickable ? 'clickable' : ''}
                 onClick={clickable ? () => onRowClick(r) : undefined}>
-              {botColumn && <td>{r.profile || '—'}</td>}
+              {showBot && <td>{r.profile || '—'}</td>}
               <td>{r[labelKey] || <em className="cost-note">(pruned {r._prunedCount})</em>}</td>
               <td>{r.sessions}</td>
               <td>{r.api_calls}</td>

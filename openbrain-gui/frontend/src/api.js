@@ -48,14 +48,14 @@ export const api = {
   getCostProfiles: () => request('/cost/profiles'),
   getCostByBot: (days) => request(`/cost/by-bot?days=${days}`),
   getCostDashboard: (days, limit = 50, profile = 'all') =>
-    request(`/cost/dashboard?days=${days}&limit=${limit}&profile=${profile}`),
+    request(`/cost/dashboard?days=${days}&limit=${limit}&profile=${encodeURIComponent(profile)}`),
   getCostSummary: (days, profile = 'all') =>
-    request(`/cost/summary?days=${days}&profile=${profile}`),
+    request(`/cost/summary?days=${days}&profile=${encodeURIComponent(profile)}`),
   getCostSession: (id, profile) =>
     request(`/cost/session/${encodeURIComponent(id)}?profile=${encodeURIComponent(profile)}`),
-  getCostConfig: (profile = 'all') => request(`/cost/config?profile=${profile}`),
+  getCostConfig: (profile = 'all') => request(`/cost/config?profile=${encodeURIComponent(profile)}`),
   getCostTimeseries: (days, group, profile = 'all') =>
-    request(`/cost/timeseries?days=${days}&group=${group}&profile=${profile}`),
+    request(`/cost/timeseries?days=${days}&group=${group}&profile=${encodeURIComponent(profile)}`),
   listCostReports: () => request('/cost/reports'),
   getCostReport: (name) => request(`/cost/reports/${encodeURIComponent(name)}`),
   saveCostReport: (name, body) =>

@@ -1,16 +1,10 @@
-import { useEffect, useState } from 'react'
-import { api } from './api'
 import { usd, tokens, pct } from './format'
 
 // The merged "All" view only: a per-bot cost breakdown that doubles as a
-// picker -- clicking a row drives the profile selector in CostView.
-export default function CostByBot({ days, onPick }) {
-  const [rows, setRows] = useState(null)
-
-  useEffect(() => {
-    api.getCostByBot(days).then(setRows).catch(() => setRows(null))
-  }, [days])
-
+// picker -- clicking a row drives the profile selector in CostView. The rows
+// are fetched in CostView.load()'s parallel batch (only for "All"), so this is
+// pure presentation: `null` (not fetched) or `[]` renders nothing.
+export default function CostByBot({ rows, onPick }) {
   if (!rows || rows.length === 0) return null
 
   return (
@@ -25,7 +19,9 @@ export default function CostByBot({ days, onPick }) {
         </thead>
         <tbody>
           {rows.map((r) => (
-            <tr key={r.key} className="clickable" onClick={() => onPick(r.key)}>
+            <tr key={r.key}
+                className={r.unavailable ? '' : 'clickable'}
+                onClick={r.unavailable ? undefined : () => onPick(r.key)}>
               <td>{r.label}{r.unavailable ? ' (unavailable)' : ''}</td>
               <td>{r.sessions}</td>
               <td>{r.api_calls}</td>

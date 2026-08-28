@@ -52,12 +52,16 @@ export default function CostView() {
     try {
       // One dashboard call covers every panel: the backend runs them all off a
       // single snapshot of Hermes' 42 MB database rather than one copy each.
-      const [dashboard, summary, config] = await Promise.all([
+      // The per-bot breakdown only exists for the merged "All" view, so it
+      // joins the same batch there and is skipped otherwise.
+      const byBotP = profile === 'all' ? api.getCostByBot(days) : Promise.resolve(null)
+      const [dashboard, summary, config, byBot] = await Promise.all([
         api.getCostDashboard(days, 50, profile),
         api.getCostSummary(days, profile),
         api.getCostConfig(profile),
+        byBotP,
       ])
-      setData({ ...dashboard, summary, config })
+      setData({ ...dashboard, summary, config, byBot })
     } catch (e) {
       // 503 = /hermes-data is not mounted. Part 2 below still renders.
       setUnavailable(e.message)
@@ -82,6 +86,10 @@ export default function CostView() {
   // saved report captures.
   const display = viewingReport ? viewingReport.payload : data
   const displayUnavailable = viewingReport ? null : unavailable
+  // The by-session rows carry their own `profile`, so this is only the
+  // single-bot fallback for the row click. For a loaded report that fallback
+  // must be the report's own profile, not the live selector.
+  const tablesProfile = viewingReport ? (display.summary?.profile ?? 'all') : profile
 
   const selectRange = (d) => {
     setDays(d)
@@ -134,7 +142,7 @@ export default function CostView() {
           <span className="cost-range-label">
             {dateRangeLabel(days, activeRange?.today)}
           </span>
-          <select className="cost-profile" value={profile}
+          <select className="cost-profile" aria-label="Bot" value={profile}
                   onChange={(e) => changeProfile(e.target.value)}>
             {profileList.map((p) => (
               <option key={p.key} value={p.key}>{p.label}</option>
@@ -173,7 +181,7 @@ export default function CostView() {
         )}
 
         {profile === 'all' && !viewingReport && (
-          <CostByBot days={days} onPick={changeProfile} />
+          <CostByBot rows={display.byBot} onPick={changeProfile} />
         )}
 
         <CostChart series={series} group={chartGroup} onGroupChange={setChartGroup} />
@@ -184,7 +192,7 @@ export default function CostView() {
               byModel={display.by_model}
               byPlatform={display.by_platform}
               bySession={display.by_session}
-              profile={profile}
+              profile={tablesProfile}
               onSelectSession={setSelectedSession}
             />
             {selectedSession && (
