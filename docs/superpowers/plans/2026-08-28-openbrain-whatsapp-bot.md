@@ -20,6 +20,23 @@ Define these in each execution shell, or expand them inline.
 
 ---
 
+## Execution status
+
+**2026-08-28 — Tasks 1–7 DONE** (stopped at the Task 7 checkpoint, before the WhatsApp cutover, per user request). Nothing user-facing has changed; WhatsApp is still fully on `default`.
+
+Discoveries during execution (fold these into Tasks 8–11):
+
+1. **Each profile's gateway binds its own `api_server` port.** `default`=8642 (default), `master`=8643, and `openbrain` needed one set: `hermes -p openbrain config set platforms.api_server.extra.port 8644 --force`. Without this, `openbrain`'s gateway hits `startup_failed: api_server_port_in_use`. Done.
+2. **`hermes -p <profile> gateway start` is a no-op on this s6/Docker image** (it only targets systemd). To bring a named gateway up live: `docker exec $C bash -lc "rm -f /run/service/gateway-<name>/down; /command/s6-svc -u /run/service/gateway-<name>"`. On a container recreate, `container_boot.py` auto-starts it from `gateway_state.json` `desired_state: running` (verified — `openbrain`'s gateway came back after `--force-recreate`).
+3. **`gateway.whatsapp.enabled` is NOT a real config key** (Hermes warns and ignores it). WhatsApp enablement is the `.env` var `WHATSAPP_ENABLED` (`true`/`false`) in the profile's `.env`. Task 8 must use that, not `config set`.
+4. **The voice server does not auto-start after a container recreate** — kick it: `docker exec $C bash /opt/data/scripts/voice_watchdog.sh` (the 5-min `voice-server-watchdog` cron would eventually do it). Container bridge IP was still `172.16.1.2`, matching `/docker/traefik/dynamic/voice.yml` — no edit needed, but always check.
+5. `GATEWAY_MULTIPLEX_PROFILES` env is unset ⇒ "separate mode": every profile runs its own gateway (that's why `openbrain`'s gateway autostarts on boot). If it were set, named gateways would only be *registered*, not started.
+6. Current temporary state: `openbrain`'s `.env` has `WHATSAPP_ENABLED=false` (set during Task 7 so the survival test didn't spawn a doomed unpaired bridge). **Task 8 flips it back to `true`.**
+
+Rollback assets in place: image tag `hvps-hermes-agent:pre-openbrain-bot-2026-08-28`; WhatsApp session backup `/opt/data/whatsapp/session.bak-2026-08-28`; `agent.py` backup `/opt/data/hermes_voice/agent.py.bak-2026-08-28`.
+
+---
+
 ## Current state (verified 2026-08-28, before any change)
 
 | Thing | Value |
@@ -369,6 +386,8 @@ Expected: voice `{"status":"ok"}`, `default` gateway running with WhatsApp `conn
 
 **Files:** none. **This task is interactive and briefly disrupts WhatsApp. Do it with the user present — they must operate their phone.**
 
+> **Mechanics corrected from execution discoveries:** WhatsApp on/off is the `.env` var `WHATSAPP_ENABLED` (not a config key). Bring a named gateway up live with `rm -f /run/service/gateway-<name>/down; /command/s6-svc -u /run/service/gateway-<name>` (or restart via `s6-svc -r`). `openbrain`'s `.env` currently has `WHATSAPP_ENABLED=false` (Task 7) and already has the correct `WHATSAPP_MODE=self-chat` + allowed-users + home-channel (cloned from `default`).
+
 - [ ] **Step 1: Tell the user what is about to happen.** WhatsApp will be offline for a few minutes. They will unlink the current Hermes device on their phone and scan a new QR.
 
 - [ ] **Step 2: Disable + disconnect WhatsApp on `default`**
@@ -376,52 +395,63 @@ Expected: voice `{"status":"ok"}`, `default` gateway running with WhatsApp `conn
 ```bash
 ssh root@srv1608402.hstgr.cloud '
 C=hermes-agent-7qpk-hermes-agent-1
-docker exec $C hermes -p default config set gateway.whatsapp.enabled false
+docker exec -u hermes $C sed -i "s/^WHATSAPP_ENABLED=true/WHATSAPP_ENABLED=false/" /opt/data/.env
+docker exec -u hermes $C grep "^WHATSAPP_ENABLED=" /opt/data/.env
 docker exec $C bash -lc "mv /opt/data/whatsapp/session /opt/data/whatsapp/session.moved-2026-08-28"
-docker exec $C hermes -p default gateway restart
+docker exec $C bash -lc "/command/s6-svc -r /run/service/gateway-default"
+sleep 15
+docker exec $C hermes -p default gateway status
 '
 ```
 
-Expected: config set OK; session dir moved aside (backup from Task 1 Step 3 also still exists); `default` gateway restarts. After ~15s, `docker exec $C hermes -p default gateway status` should no longer list a healthy `whatsapp` platform (it may show `not_configured` / absent).
+Expected: `WHATSAPP_ENABLED=false`; session dir moved aside (the Task 1 backup also still exists); `default`'s gateway restarts and its `whatsapp` platform is no longer present/connected. `bridge.js` for the old `/opt/data/whatsapp/session` should stop.
 
-- [ ] **Step 3: Ensure `openbrain`'s WhatsApp is enabled and in self-chat mode**
+- [ ] **Step 3: Enable WhatsApp on `openbrain`**
 
 ```bash
 ssh root@srv1608402.hstgr.cloud '
 C=hermes-agent-7qpk-hermes-agent-1
-docker exec $C hermes -p openbrain config set gateway.whatsapp.enabled true
-docker exec -u hermes $C bash -lc "grep -q \"^WHATSAPP_MODE=\" /opt/data/profiles/openbrain/.env || echo \"WHATSAPP_MODE=self-chat\" >> /opt/data/profiles/openbrain/.env"
+docker exec -u hermes $C sed -i "s/^WHATSAPP_ENABLED=false/WHATSAPP_ENABLED=true/" /opt/data/profiles/openbrain/.env
+docker exec -u hermes $C grep -E "^WHATSAPP_(ENABLED|MODE)=" /opt/data/profiles/openbrain/.env
 '
 ```
+
+Expected: `WHATSAPP_ENABLED=true`, `WHATSAPP_MODE=self-chat`.
 
 - [ ] **Step 4: On the phone — unlink the old device.** WhatsApp → Settings → Linked Devices → tap the existing Hermes/Chrome device → **Log out**.
 
-- [ ] **Step 5: Pair `openbrain` via QR**
+- [ ] **Step 5: Restart `openbrain`'s gateway, then pair via QR**
 
 ```bash
+# restart so it picks up WHATSAPP_ENABLED=true
+ssh root@srv1608402.hstgr.cloud 'docker exec hermes-agent-7qpk-hermes-agent-1 bash -lc "/command/s6-svc -r /run/service/gateway-openbrain"; sleep 8'
+# interactive QR pairing (‑t for a TTY)
 ssh root@srv1608402.hstgr.cloud -t 'docker exec -it hermes-agent-7qpk-hermes-agent-1 hermes -p openbrain whatsapp'
 ```
 
-(The `-t` gives an interactive TTY so the QR renders.) The user scans it from WhatsApp → Linked Devices → Link a Device. Wait for the "paired" confirmation.
+The user scans the QR from WhatsApp → Linked Devices → Link a Device. Wait for the "paired" confirmation. (If `hermes -p openbrain whatsapp` only prints config and no QR, the gateway is already trying to pair — read the QR from `docker exec $C hermes -p openbrain logs -f` or the dashboard instead.)
 
-- [ ] **Step 6: Restart `openbrain`'s gateway and confirm WhatsApp connects**
+- [ ] **Step 6: Confirm WhatsApp connects on `openbrain`**
 
 ```bash
 ssh root@srv1608402.hstgr.cloud '
 C=hermes-agent-7qpk-hermes-agent-1
-docker exec $C hermes -p openbrain gateway restart
+docker exec $C bash -lc "/command/s6-svc -r /run/service/gateway-openbrain"
 sleep 15
 docker exec $C hermes -p openbrain gateway status
+docker exec $C bash -lc "grep -o \"whatsapp[^}]*}\" /opt/data/profiles/openbrain/gateway_state.json"
 docker exec $C bash -lc "ps aux | grep bridge.js | grep -v grep"
 '
 ```
 
-Expected: `openbrain` gateway status shows `whatsapp: connected`; a `bridge.js` process now runs with `--session /opt/data/profiles/openbrain/…/whatsapp/session` (path differs from the old `/opt/data/whatsapp/session`).
+Expected: `openbrain` gateway status shows `whatsapp: connected`; `gateway_state.json` contains a `whatsapp` platform entry with `state: connected`; a `bridge.js` process runs with a `--session` path under `/opt/data/profiles/openbrain/…` (different from the old `/opt/data/whatsapp/session`).
 
-- [ ] **Step 7: Persist `openbrain`'s desired gateway state** (so the recreate in Task 10 keeps it)
+- [ ] **Step 7: Persist `openbrain`'s desired gateway state**
+
+`gateway_state.json` `desired_state` is already `running` from Task 7. Confirm it still is:
 
 ```bash
-ssh root@srv1608402.hstgr.cloud 'docker exec hermes-agent-7qpk-hermes-agent-1 hermes -p openbrain gateway start || true'
+ssh root@srv1608402.hstgr.cloud 'docker exec hermes-agent-7qpk-hermes-agent-1 bash -lc "grep -o \"desired_state[^,]*\" /opt/data/profiles/openbrain/gateway_state.json"'
 ```
 
 ---
@@ -511,6 +541,12 @@ ssh root@srv1608402.hstgr.cloud '
 cd /docker/hermes-agent-7qpk && docker compose up -d --force-recreate hermes-agent
 sleep 25
 C=hermes-agent-7qpk-hermes-agent-1
+# voice does not auto-start after a recreate — kick its watchdog
+docker exec $C bash /opt/data/scripts/voice_watchdog.sh
+# check the bridge IP still matches traefik voice.yml (expect 172.16.1.2)
+docker inspect $C -f "{{range \$k,\$v := .NetworkSettings.Networks}}{{\$v.IPAddress}}{{end}}"
+grep -o "http://[0-9.]*:8765" /docker/traefik/dynamic/voice.yml
+sleep 4
 docker exec $C hermes gateway list
 docker exec $C hermes -p openbrain gateway status   # whatsapp: connected
 docker exec $C hermes -p default gateway status
@@ -518,15 +554,18 @@ curl -s https://srv1608402.hstgr.cloud/voice/health
 '
 ```
 
-Expected: all three gateways up, `openbrain` WhatsApp `connected`, voice healthy.
+Expected: all three gateways up, `openbrain` WhatsApp `connected`, voice healthy `{"status":"ok"}`. If the two IP lines differ, edit `voice.yml`'s `url` to the new IP and `docker restart traefik-traefik-1`.
 
 - [ ] **Step 7: Clean up `master`'s stale WhatsApp state** (it was cloned-on and is `fatal/not_paired`)
 
 ```bash
 ssh root@srv1608402.hstgr.cloud '
 C=hermes-agent-7qpk-hermes-agent-1
-docker exec $C hermes -p master config set gateway.whatsapp.enabled false
-docker exec $C hermes -p master gateway restart
+docker exec -u hermes $C grep "^WHATSAPP_ENABLED=" /opt/data/profiles/master/.env
+docker exec -u hermes $C sed -i "s/^WHATSAPP_ENABLED=true/WHATSAPP_ENABLED=false/" /opt/data/profiles/master/.env
+docker exec $C bash -lc "/command/s6-svc -r /run/service/gateway-master"
+sleep 12
+docker exec $C hermes -p master gateway status
 '
 ```
 
