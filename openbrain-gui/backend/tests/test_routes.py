@@ -672,7 +672,7 @@ def test_dashboard_all_vs_specific_profile(client, monkeypatch):
 
 
 def test_unknown_profile_is_404(client, monkeypatch):
-    import app.profiles as pr, app.cost_merge as cm
+    import app.profiles as pr
     monkeypatch.setattr(pr, "resolve", lambda k: None)
     assert client.get("/api/cost/dashboard?profile=ghost").status_code == 404
 

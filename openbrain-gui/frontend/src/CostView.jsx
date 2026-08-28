@@ -88,8 +88,10 @@ export default function CostView() {
   const displayUnavailable = viewingReport ? null : unavailable
   // The by-session rows carry their own `profile`, so this is only the
   // single-bot fallback for the row click. For a loaded report that fallback
-  // must be the report's own profile, not the live selector.
-  const tablesProfile = viewingReport ? (display.summary?.profile ?? 'all') : profile
+  // must be the report's own profile, not the live selector. Pre-per-bot
+  // reports have no `summary.profile`; they were the root bot, so fall back to
+  // 'default' -- 'all' would make the row click hit /cost/session with a 400.
+  const tablesProfile = viewingReport ? (display.summary?.profile ?? 'default') : profile
 
   const selectRange = (d) => {
     setDays(d)

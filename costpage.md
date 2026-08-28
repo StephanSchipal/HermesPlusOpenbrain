@@ -75,7 +75,8 @@ Hermes now runs several bots, each its own profile with its own `state.db`
 - **"All" (the default)** — every Part 1 panel shows the summed-across-all-bots numbers, plus two
   extra tables: **Cost by bot** (Bot · sessions · calls · tokens · cost · % — click a row to jump
   to that bot) and **Config by bot** (each bot's `model.default`, `compression.threshold`,
-  `cache_ttl`, `max_turns`, `disabled_toolsets`, `retention_days` side by side). The **Top
+  `compression.threshold_tokens`, `cache_ttl`, `max_turns`, `disabled_toolsets`, `retention_days`
+  side by side). The **Top
   spenders** table gains a **Bot** column so you can see which bot a session belongs to.
 - **Picking a specific bot** scopes every panel — tiles, tables, chart, drill-down — to that bot's
   `state.db`. The Bot column disappears; the Config panel returns to the single key/value form.
@@ -376,6 +377,9 @@ An **unknown key is `404`** on `dashboard`/`config`/`session`/`summary`; `timese
 (it reads `gui.db`'s ledger, so an unknown key just filters to no rows). `/api/cost/config` for a
 readable bot with **no `config.yaml`** is `503`; the same bot inside `?profile=all` is a row with
 `unavailable: true` — the merge path tolerates gaps, a single-bot read does not.
+
+With the **mount absent entirely**, `/api/cost/config` returns `200 []` (an empty bot list —
+`config_all` has no profiles to enumerate), unlike `/dashboard` and `/summary`, which still `503`.
 
 **`PUT /api/cost/external` is upsert-only** and deliberately does not delete rows absent from the
 payload — the Save button always sends the whole visible grid, and removing a row is a separate
