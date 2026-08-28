@@ -53,7 +53,7 @@ dropdown.
 |---|---|
 | `hermes_usage.py` already takes `data_dir` on **every** function, and `snapshot(data_dir)` reads `Path(data_dir)/"state.db"` | A single-bot view needs no new query code — just the right `data_dir`. |
 | Each profile has its own `state.db`; `sessions.profile_name` in `default`'s db is `(null)` for 218/219 rows | The **db file is the partition**, not a column. Don't filter by `profile_name`. |
-| `default`'s `state.db` is ~90 MB; the six others are 0.26–0.85 MB | Looping all seven per request/tick is dominated by the one `default` copy (~50 ms). Acceptable. |
+| `default`'s `state.db` is ~90 MB; the six others are 0.26–0.85 MB | Looping all seven per request/tick is dominated by the one `default` copy (~50 ms). Acceptable. **Correction (post-implementation):** one "All" page load actually makes ~21 copies — `dashboard_all` (7) + `summary_all` via `/cost/summary` (7) + `per_bot_breakdown` via `/cost/by-bot` (7), three of them the full ~90 MB db, across ~3 concurrent requests. Fine for a single-user manual GUI; if latency ever matters, have `dashboard_all` also emit the per-bot rows so the All view derives from one payload. |
 | `usage_ledger` already carries a denormalised `platform` column; `usage_watermark` PK is `(session_id, model, task)` | Add a `profile` column to both; rebuild `usage_watermark`'s PK. |
 | `db.py` has no migration machinery — `_SCHEMA` is `CREATE TABLE IF NOT EXISTS` in one `executescript` | Add a tiny explicit migration in `init_db()` for the `profile` column + watermark rebuild. |
 | `main.py` poller: `asyncio.to_thread(ledger_store.run_once)` every `LEDGER_POLL_SECONDS` | Poller calls a new `run_all()` that fans out over discovered profiles. |
