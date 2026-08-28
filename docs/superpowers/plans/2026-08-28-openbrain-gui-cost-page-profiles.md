@@ -211,11 +211,11 @@ def test_migration_adds_profile_and_preserves_watermark_rows(tmp_path):
         assert conn.execute("SELECT profile FROM usage_ledger").fetchone()[0] == "default"
         wm = conn.execute("SELECT profile, api_call_count FROM usage_watermark").fetchone()
         assert wm == ("default", 42)
-        pk = [r[1] for r in conn.execute("PRAGMA table_info(usage_watermark)") if r[5]]
-        assert pk == []  # composite PK is not reported per-column here; see index check
-        idx = conn.execute("PRAGMA index_list(usage_watermark)").fetchall()
-        assert any("profile" in str(conn.execute(f"PRAGMA index_info({i[1]})").fetchall())
-                   or i[3] == "pk" for i in idx)
+        # PRAGMA table_info: col 1 = name, col 5 = pk (1-based position in the
+        # composite PK, 0 if not part of it). Assert the exact PK column set/order.
+        pk_cols = sorted((r[5], r[1]) for r in conn.execute(
+            "PRAGMA table_info(usage_watermark)") if r[5])
+        assert [name for _, name in pk_cols] == ["profile", "session_id", "model", "task"]
 
 
 def test_migration_is_idempotent(tmp_path):
