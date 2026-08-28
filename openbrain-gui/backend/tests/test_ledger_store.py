@@ -246,3 +246,43 @@ def test_timeseries_filters_by_profile(tmp_path):
                                     profile="all", now_iso="2026-08-02T00:00:00+00:00")
     assert sum(p["api_calls"] for p in only_coder["points"]) == 3
     assert sum(p["api_calls"] for p in all_p["points"]) == 6
+
+
+def test_run_all_swallows_profile_discovery_failure(tmp_path, monkeypatch):
+    """`_poll_forever` has no try/except, so a raising `list_profiles`
+    (EACCES on the mount, a TOCTOU during a dir scan) would kill the poller
+    for the life of the process. run_all must absorb it."""
+    db_path = _db(tmp_path)
+    from app import profiles
+
+    def boom():
+        raise PermissionError("[Errno 13] Permission denied: '/hermes-data'")
+
+    monkeypatch.setattr(profiles, "list_profiles", boom)
+    assert ledger_store.run_all(path=db_path) == {}
+
+
+def test_run_all_fans_out_once_per_profile(tmp_path, monkeypatch):
+    db_path = _db(tmp_path)
+    from app import profiles
+
+    monkeypatch.setattr(profiles, "list_profiles", lambda: [
+        {"key": "default", "label": "Hermes-Agent", "data_dir": "/data"},
+        {"key": "coder", "label": "coder", "data_dir": "/data/profiles/coder"},
+    ])
+    calls = []
+
+    def spy(*, profile, data_dir, path):
+        calls.append((profile, data_dir, path))
+        return {"seeded": True, "rows_written": 0}
+
+    monkeypatch.setattr(ledger_store, "run_once", spy)
+    result = ledger_store.run_all(path=db_path)
+    assert calls == [
+        ("default", "/data", db_path),
+        ("coder", "/data/profiles/coder", db_path),
+    ]
+    assert result == {
+        "default": {"seeded": True, "rows_written": 0},
+        "coder": {"seeded": True, "rows_written": 0},
+    }

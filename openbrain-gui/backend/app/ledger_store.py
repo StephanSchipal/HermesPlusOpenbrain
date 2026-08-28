@@ -37,14 +37,12 @@ def apply_tick(rows: list[dict], *, profile: str, path: str | None = None,
                observed_at: str | None = None) -> dict:
     observed_at = observed_at or datetime.now(timezone.utc).isoformat()
     with get_conn(path) as conn:
-        seeding = conn.execute(
-            "SELECT 1 FROM usage_watermark WHERE profile = ? LIMIT 1", (profile,)
-        ).fetchone() is None
         marks = {
             (r["session_id"], r["model"], r["task"]): dict(r)
             for r in conn.execute(
                 "SELECT * FROM usage_watermark WHERE profile = ?", (profile,))
         }
+        seeding = not marks
         written = 0
 
         for row in rows:
@@ -99,12 +97,13 @@ def timeseries(*, path: str | None = None, days: int = 30,
     # `group` is validated against a two-item tuple immediately above, so
     # interpolating it into the SQL cannot inject anything. Everything the
     # caller supplies still goes through a `?` placeholder.
+    def _profile_filter() -> tuple[str, list]:
+        """(SQL fragment, params) restricting to one profile -- empty for 'all'."""
+        return ("", []) if profile == "all" else ("profile = ?", [profile])
+
     with get_conn(path) as conn:
-        where = "observed_at >= ?"
-        params: list = [cutoff_iso]
-        if profile != "all":
-            where += " AND profile = ?"
-            params.append(profile)
+        frag, frag_params = _profile_filter()
+        where = "observed_at >= ?" + (f" AND {frag}" if frag else "")
         rows = conn.execute(
             f"""
             SELECT SUBSTR(observed_at, 1, 10) AS day, {group} AS grp,
@@ -119,14 +118,11 @@ def timeseries(*, path: str | None = None, days: int = 30,
             GROUP BY day, grp
             ORDER BY day ASC
             """,
-            params,
+            [cutoff_iso, *frag_params],
         ).fetchall()
-        first_q = "SELECT MIN(observed_at) AS first FROM usage_ledger"
-        first_params: list = []
-        if profile != "all":
-            first_q += " WHERE profile = ?"
-            first_params.append(profile)
-        first = conn.execute(first_q, first_params).fetchone()
+        first_q = "SELECT MIN(observed_at) AS first FROM usage_ledger" + (
+            f" WHERE {frag}" if frag else "")
+        first = conn.execute(first_q, frag_params).fetchone()
 
     points = [
         {"day": r["day"], "group": r["grp"], "cost_usd": r["cost_usd"],
@@ -164,7 +160,16 @@ def run_once(*, profile: str, data_dir: str, path: str | None = None) -> dict:
 def run_all(*, path: str | None = None) -> dict:
     """One poll cycle across every discovered profile. Never raises."""
     from app import profiles
+    try:
+        discovered = profiles.list_profiles()
+    except Exception as exc:
+        _log.warning("ledger fan-out skipped: profile discovery failed: %s", exc)
+        return {}
     results = {}
-    for p in profiles.list_profiles():
-        results[p["key"]] = run_once(profile=p["key"], data_dir=p["data_dir"], path=path)
+    for p in discovered:
+        try:
+            results[p["key"]] = run_once(profile=p["key"], data_dir=p["data_dir"], path=path)
+        except Exception as exc:  # defense in depth -- run_once shouldn't raise
+            _log.warning("ledger tick crashed for profile %s: %s", p["key"], exc)
+            results[p["key"]] = {"skipped": str(exc)}
     return results
