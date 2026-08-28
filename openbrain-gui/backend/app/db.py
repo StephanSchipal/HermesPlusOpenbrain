@@ -112,11 +112,25 @@ def _migrate(conn: sqlite3.Connection) -> None:
     each branch is guarded by a column-existence check, so it is a no-op on a
     db that `_SCHEMA` already built with the final shape."""
     if "profile" not in _table_columns(conn, "usage_ledger"):
+        # ADD COLUMN appends `profile` as the last column on a migrated db,
+        # whereas `_SCHEMA` lists it 5th on a fresh one. Deliberate, accepted
+        # divergence: every read of usage_ledger is by column name (no
+        # `SELECT *` / positional access), so physical order does not matter.
         conn.execute(
             "ALTER TABLE usage_ledger ADD COLUMN profile TEXT NOT NULL DEFAULT 'default'"
         )
     if "profile" not in _table_columns(conn, "usage_watermark"):
+        # SQLite cannot alter a PRIMARY KEY in place, so the table is rebuilt.
+        # `executescript` runs with no enclosing transaction, so the whole
+        # rebuild is wrapped in one BEGIN/COMMIT: a crash mid-migration must not
+        # leave a half-built `usage_watermark_new` (next boot crash-loops on
+        # "table already exists") or an empty `usage_watermark` (silent
+        # watermark loss). `DROP ... IF EXISTS` clears any orphan left by a
+        # prior aborted run. `COALESCE` covers a gui.db written before these
+        # counters were made NOT NULL, whose NULLs would fail the new table.
         conn.executescript("""
+            BEGIN;
+            DROP TABLE IF EXISTS usage_watermark_new;
             CREATE TABLE usage_watermark_new (
                 profile TEXT NOT NULL DEFAULT 'default',
                 session_id TEXT NOT NULL, model TEXT NOT NULL,
@@ -134,12 +148,15 @@ def _migrate(conn: sqlite3.Connection) -> None:
                 (profile, session_id, model, task, api_call_count, input_tokens,
                  output_tokens, cache_read_tokens, cache_write_tokens,
                  reasoning_tokens, estimated_cost_usd)
-            SELECT 'default', session_id, model, task, api_call_count, input_tokens,
-                   output_tokens, cache_read_tokens, cache_write_tokens,
-                   reasoning_tokens, estimated_cost_usd
+            SELECT 'default', session_id, model, task,
+                   COALESCE(api_call_count, 0), COALESCE(input_tokens, 0),
+                   COALESCE(output_tokens, 0), COALESCE(cache_read_tokens, 0),
+                   COALESCE(cache_write_tokens, 0), COALESCE(reasoning_tokens, 0),
+                   COALESCE(estimated_cost_usd, 0)
             FROM usage_watermark;
             DROP TABLE usage_watermark;
             ALTER TABLE usage_watermark_new RENAME TO usage_watermark;
+            COMMIT;
         """)
 
 
