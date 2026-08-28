@@ -437,18 +437,34 @@ def test_put_handles_a_batch_of_new_and_existing_rows(client):
     assert rows["Anthropic"]["amount"] == 94.17
 
 
+# /api/cost/config dropped from this list: with profile="all" (the default) it
+# routes through cost_merge.config_all(), which degrades to [] (200) rather than
+# 503 when no profile is readable -- covered by its own test below.
 HERMES_ENDPOINTS = [
-    "/api/cost/summary", "/api/cost/dashboard", "/api/cost/config",
+    "/api/cost/summary", "/api/cost/dashboard",
 ]
 
 
 @pytest.mark.parametrize("endpoint", HERMES_ENDPOINTS)
 def test_hermes_endpoints_return_503_when_data_dir_absent(client, monkeypatch, tmp_path, endpoint):
+    # profile="all" (the default) routes these through cost_merge.*, which
+    # enumerate profiles.list_profiles() -> [] when no state.db is discoverable,
+    # then raise HermesDataUnavailable -> 503.
     import app.hermes_usage as hu
-    monkeypatch.setattr(hu, "HERMES_DATA_DIR", str(tmp_path / "not-mounted"))
+    import app.profiles as pr
+    missing = str(tmp_path / "not-mounted")
+    monkeypatch.setattr(hu, "HERMES_DATA_DIR", missing)
+    monkeypatch.setattr(pr, "HERMES_DATA_DIR", missing)
     resp = client.get(endpoint)
     assert resp.status_code == 503
-    assert "not found" in resp.json()["detail"]
+
+
+def test_cost_config_returns_empty_list_when_no_profile_readable(client, monkeypatch, tmp_path):
+    import app.profiles as pr
+    monkeypatch.setattr(pr, "HERMES_DATA_DIR", str(tmp_path / "not-mounted"))
+    resp = client.get("/api/cost/config")
+    assert resp.status_code == 200
+    assert resp.json() == []
 
 
 def test_part2_still_works_when_hermes_data_absent(client, monkeypatch, tmp_path):
@@ -470,9 +486,11 @@ def _fake_summary(**over):
 
 
 def test_summary_combines_hermes_and_external_costs(client, monkeypatch):
-    import app.hermes_usage as hu
-    monkeypatch.setattr(hu, "summary",
-                        lambda data_dir=None, **kw: _fake_summary())
+    # profile="all" (the default) => the route reads the fleet figure from
+    # cost_merge.summary_all, not hermes_usage.summary directly.
+    import app.cost_merge as cm
+    monkeypatch.setattr(cm, "summary_all",
+                        lambda **kw: {**_fake_summary(), "skipped_profiles": []})
     client.put("/api/cost/fx", json={"usd_to_eur": 0.80})
     client.put("/api/cost/external", json={"rows": [
         {"name": "Hostinger", "period": "monthly", "amount": 12.99,
@@ -490,8 +508,9 @@ def test_summary_combines_hermes_and_external_costs(client, monkeypatch):
 def test_summary_marks_the_total_incomplete_when_a_euro_row_lacks_a_rate(client, monkeypatch):
     """A EUR row contributes 0 to the USD total until a rate exists, so the
     combined total is understated too -- it must say so."""
-    import app.hermes_usage as hu
-    monkeypatch.setattr(hu, "summary", lambda data_dir=None, **kw: _fake_summary())
+    import app.cost_merge as cm
+    monkeypatch.setattr(cm, "summary_all",
+                        lambda **kw: {**_fake_summary(), "skipped_profiles": []})
     client.put("/api/cost/external", json={"rows": [
         {"name": "Euro thing", "period": "monthly", "amount": 10.0,
          "entered_currency": "EUR", "url": None, "comments": None,
@@ -502,8 +521,9 @@ def test_summary_marks_the_total_incomplete_when_a_euro_row_lacks_a_rate(client,
 
 
 def test_summary_reports_estimate_vs_actual_when_row_flagged(client, monkeypatch):
-    import app.hermes_usage as hu
-    monkeypatch.setattr(hu, "summary", lambda data_dir=None, **kw: _fake_summary())
+    import app.cost_merge as cm
+    monkeypatch.setattr(cm, "summary_all",
+                        lambda **kw: {**_fake_summary(), "skipped_profiles": []})
     client.put("/api/cost/external", json={"rows": [
         {"name": "Anthropic", "period": "monthly", "amount": 91.40,
          "entered_currency": "USD", "url": None, "comments": None,
@@ -517,11 +537,12 @@ def test_summary_reports_estimate_vs_actual_when_row_flagged(client, monkeypatch
 
 
 def test_dashboard_endpoint_returns_all_panels(client, monkeypatch):
-    import app.hermes_usage as hu
-    monkeypatch.setattr(hu, "dashboard", lambda data_dir=None, **kw: {
+    # profile="all" (the default) => the route merges via cost_merge.dashboard_all.
+    import app.cost_merge as cm
+    monkeypatch.setattr(cm, "dashboard_all", lambda **kw: {
         "summary": _fake_summary(), "by_model": [], "by_platform": [],
         "by_session": [], "efficiency": [], "top_tools": {"tools": [], "token_attribution_available": False},
-        "prompt_budget": [],
+        "prompt_budget": [], "skipped_profiles": [],
     })
     body = client.get("/api/cost/dashboard?days=30").json()
     assert body["summary"]["cost_usd"] == pytest.approx(94.17)
@@ -530,8 +551,11 @@ def test_dashboard_endpoint_returns_all_panels(client, monkeypatch):
 
 def test_session_detail_404_for_unknown_id(client, monkeypatch):
     import app.hermes_usage as hu
-    monkeypatch.setattr(hu, "session_detail", lambda sid, *, data_dir=None: None)
-    assert client.get("/api/cost/session/nope").status_code == 404
+    import app.profiles as pr
+    monkeypatch.setattr(pr, "resolve", lambda k: "/hd" if k == "default" else None)
+    monkeypatch.setattr(hu, "session_detail",
+                        lambda sid, *, data_dir=None, conn=None: None)
+    assert client.get("/api/cost/session/nope?profile=default").status_code == 404
 
 
 def _ledger_row(**over):
@@ -622,3 +646,69 @@ def test_cost_reports_work_without_hermes_data(client, monkeypatch, tmp_path):
     }).status_code == 200
     assert client.get("/api/cost/reports").status_code == 200
     assert client.get(f"/api/cost/reports/{name}").status_code == 200
+
+
+# --- Task 6: ?profile= params + per-bot routes -------------------------------
+
+def test_profiles_route_lists_bots(client, monkeypatch, tmp_path):
+    import app.profiles as pr
+    root = tmp_path / "hd"; (root / "profiles" / "coder").mkdir(parents=True)
+    (root / "state.db").touch(); (root / "profiles" / "coder" / "state.db").touch()
+    monkeypatch.setattr(pr, "HERMES_DATA_DIR", str(root))
+    body = client.get("/api/cost/profiles").json()
+    assert body == [{"key": "default", "label": "Hermes-Agent"}, {"key": "coder", "label": "coder"}]
+
+
+def test_dashboard_all_vs_specific_profile(client, monkeypatch):
+    import app.cost_merge as cm, app.hermes_usage as hu, app.profiles as pr
+    monkeypatch.setattr(pr, "resolve", lambda k: "/hd/coder" if k == "coder" else None)
+    monkeypatch.setattr(cm, "dashboard_all", lambda **kw: {"_via": "merge"})
+    monkeypatch.setattr(hu, "dashboard", lambda **kw: {"_via": "single", "data_dir": kw.get("data_dir")})
+    assert client.get("/api/cost/dashboard").json()["_via"] == "merge"          # default all
+    assert client.get("/api/cost/dashboard?profile=all").json()["_via"] == "merge"
+    got = client.get("/api/cost/dashboard?profile=coder").json()
+    assert got == {"_via": "single", "data_dir": "/hd/coder"}
+
+
+def test_unknown_profile_is_404(client, monkeypatch):
+    import app.profiles as pr, app.cost_merge as cm
+    monkeypatch.setattr(pr, "resolve", lambda k: None)
+    assert client.get("/api/cost/dashboard?profile=ghost").status_code == 404
+
+
+def test_session_route_requires_a_specific_profile(client, monkeypatch):
+    import app.profiles as pr, app.hermes_usage as hu
+    monkeypatch.setattr(pr, "resolve", lambda k: "/hd" if k == "default" else None)
+    monkeypatch.setattr(hu, "session_detail", lambda sid, *, data_dir=None, conn=None: {"id": sid})
+    assert client.get("/api/cost/session/s1?profile=all").status_code == 400
+    assert client.get("/api/cost/session/s1?profile=default").json()["id"] == "s1"
+
+
+def test_by_bot_route(client, monkeypatch):
+    import app.cost_merge as cm
+    monkeypatch.setattr(cm, "per_bot_breakdown", lambda **kw: [{"key": "default", "cost_usd": 9.0}])
+    assert client.get("/api/cost/by-bot?days=30").json()[0]["key"] == "default"
+
+
+def test_summary_tco_is_fleetwide_regardless_of_profile(client, monkeypatch):
+    import app.cost_merge as cm, app.hermes_usage as hu, app.profiles as pr
+    # the /cost/summary route uses cost_merge.summary_all for the fleet figure
+    monkeypatch.setattr(cm, "summary_all",
+                        lambda **kw: {**_fake_summary(), "cost_usd": 100.0, "skipped_profiles": []})
+    monkeypatch.setattr(hu, "summary",
+                        lambda *, data_dir=None, **kw: {**_fake_summary(), "cost_usd": 4.0})
+    monkeypatch.setattr(pr, "resolve", lambda k: "/hd/openbrain" if k == "openbrain" else "/hd")
+    all_body = client.get("/api/cost/summary?profile=all").json()
+    one_body = client.get("/api/cost/summary?profile=openbrain").json()
+    assert all_body["total_cost_of_ownership_usd"] == one_body["total_cost_of_ownership_usd"]
+    assert one_body["hermes_cost_usd_selected"] == pytest.approx(4.0)
+    assert all_body["hermes_cost_usd_selected"] == pytest.approx(100.0)
+
+
+def test_dashboard_all_passes_skipped_profiles_through(client, monkeypatch):
+    import app.cost_merge as cm
+    monkeypatch.setattr(cm, "dashboard_all",
+                        lambda **kw: {"summary": _fake_summary(), "by_model": [],
+                                      "skipped_profiles": ["openbrain"]})
+    body = client.get("/api/cost/dashboard?profile=all").json()
+    assert body["skipped_profiles"] == ["openbrain"]

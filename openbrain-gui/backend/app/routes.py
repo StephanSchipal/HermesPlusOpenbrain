@@ -10,6 +10,7 @@ from pydantic import BaseModel
 
 from app import mcp_client, prompts_store, delete_log_store, subject_line, graph
 from app import external_costs_store, fx, hermes_usage, ledger_store, cost_reports_store
+from app import cost_merge, profiles
 from app.mcp_client import OpenBrainMCPError
 from app.hermes_usage import HermesDataUnavailable
 from app.config import DEFAULT_SEARCH_K, DEFAULT_DELETE_LOG_LIMIT, GRAPH_MAX_CAPTURES
@@ -277,29 +278,52 @@ def _hermes(fn, *args, **kwargs):
     except HermesDataUnavailable as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
+def _profile_dir(profile: str) -> str:
+    """Resolve a non-'all' profile key to its data_dir, or 404."""
+    data_dir = profiles.resolve(profile)
+    if data_dir is None:
+        raise HTTPException(status_code=404, detail=f"unknown profile: {profile}")
+    return data_dir
+
+@router.get("/cost/profiles")
+def get_cost_profiles():
+    return [{"key": p["key"], "label": p["label"]} for p in profiles.list_profiles()]
+
+@router.get("/cost/by-bot")
+def get_cost_by_bot(days: int = 30):
+    return _hermes(cost_merge.per_bot_breakdown, days=days)
+
 @router.get("/cost/dashboard")
-def get_cost_dashboard(days: int = 30, limit: int = 50):
-    return _hermes(hermes_usage.dashboard, days=days, limit=limit)
+def get_cost_dashboard(days: int = 30, limit: int = 50, profile: str = "all"):
+    if profile == "all":
+        return _hermes(cost_merge.dashboard_all, days=days, limit=limit)
+    return _hermes(hermes_usage.dashboard, data_dir=_profile_dir(profile), days=days, limit=limit)
 
 @router.get("/cost/session/{session_id}")
-def get_cost_session(session_id: str):
-    detail = _hermes(hermes_usage.session_detail, session_id)
+def get_cost_session(session_id: str, profile: str = Query(...)):
+    if profile == "all":
+        raise HTTPException(status_code=400,
+                            detail="a specific profile is required for a session lookup")
+    detail = _hermes(hermes_usage.session_detail, session_id, data_dir=_profile_dir(profile))
     if detail is None:
         raise HTTPException(status_code=404, detail="session not found")
     return detail
 
 @router.get("/cost/config")
-def get_cost_config():
-    return _hermes(hermes_usage.config_snapshot)
+def get_cost_config(profile: str = "all"):
+    if profile == "all":
+        return _hermes(cost_merge.config_all)
+    return _hermes(hermes_usage.config_snapshot, data_dir=_profile_dir(profile))
 
 @router.get("/cost/timeseries")
-def get_cost_timeseries(days: int = 30, group: str = "model"):
+def get_cost_timeseries(days: int = 30, group: str = "model", profile: str = "all"):
     # Reads gui.db, not state.db -- deliberately no _hermes() wrapper, so the
     # chart survives the mount being absent. `group` is annotated `str` rather
     # than Literal so a bad value gives a 400 with a plain `detail`, matching
     # every other /api/cost/* validation failure instead of FastAPI's 422.
+    # `profile="all"` means no filter (see ledger_store.timeseries).
     try:
-        return ledger_store.timeseries(days=days, group=group)
+        return ledger_store.timeseries(days=days, group=group, profile=profile)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -321,14 +345,24 @@ def put_cost_report(name: str, body: CostReportSaveRequest):
     return cost_reports_store.save_report(name, body.days, body.range_label, body.payload)
 
 @router.get("/cost/summary")
-def get_cost_summary(days: int = 30):
-    hermes = _hermes(hermes_usage.summary, days=days)
+def get_cost_summary(days: int = 30, profile: str = "all"):
+    # Selected-profile figures drive the header tiles. "all" == the fleet sum,
+    # so the selected summary and the fleet summary are the same object then.
+    if profile == "all":
+        selected = _hermes(cost_merge.summary_all, days=days)
+        fleet = selected
+    else:
+        selected = _hermes(hermes_usage.summary, data_dir=_profile_dir(profile), days=days)
+        fleet = _hermes(cost_merge.summary_all, days=days)
+
     rate_row = fx.get_rate()
     rate = rate_row["usd_to_eur"] if rate_row else None
     rows = external_costs_store.list_rows()
     external = external_costs_store.totals(rows, rate)
 
-    total_usd = hermes["cost_usd"] + external["monthly_usd"]
+    # TCO and the invoice comparison are FLEET-WIDE: the Anthropic invoice and
+    # the Hostinger line cover every bot, not just the one in the dropdown.
+    total_usd = fleet["cost_usd"] + external["monthly_usd"]
     # A EUR row with no rate contributes 0 to external["monthly_usd"], so the
     # combined figure is understated too -- carry the flag rather than let the
     # UI print a confident wrong number.
@@ -341,8 +375,8 @@ def get_cost_summary(days: int = 30):
         # the 30-day figure regardless of the selected range. When 30 days is
         # already what was asked for -- the default, and so the common case --
         # reuse it rather than copying state.db a second time.
-        baseline = (hermes["cost_usd"] if days == 30
-                    else _hermes(hermes_usage.summary, days=30)["cost_usd"])
+        baseline = (fleet["cost_usd"] if days == 30
+                    else _hermes(cost_merge.summary_all, days=30)["cost_usd"])
         actual = external_costs_store.amounts(flagged, rate)["usd"]
         if actual is not None and baseline:
             comparison = {
@@ -354,7 +388,10 @@ def get_cost_summary(days: int = 30):
 
     return {
         "days": days,
-        "hermes": hermes,
+        "profile": profile,
+        "hermes": selected,
+        "hermes_cost_usd_selected": selected["cost_usd"],
+        "skipped_profiles": fleet.get("skipped_profiles", []),
         "external": external,
         "rate": rate_row,
         "total_cost_of_ownership_usd": total_usd,
