@@ -545,9 +545,10 @@ def _ledger_row(**over):
 
 def test_timeseries_endpoint_returns_points_and_collecting_since(client):
     from app import ledger_store
-    ledger_store.apply_tick([_ledger_row()], observed_at="2026-08-01T00:00:00+00:00")
+    ledger_store.apply_tick([_ledger_row()], profile="default",
+                            observed_at="2026-08-01T00:00:00+00:00")
     ledger_store.apply_tick([_ledger_row(api_call_count=5, estimated_cost_usd=3.0)],
-                            observed_at="2026-08-01T06:00:00+00:00")
+                            profile="default", observed_at="2026-08-01T06:00:00+00:00")
     body = client.get("/api/cost/timeseries?days=3650&group=model").json()
     assert body["collecting_since"] == "2026-08-01"
     assert body["points"][0]["group"] == "claude-sonnet-5"
