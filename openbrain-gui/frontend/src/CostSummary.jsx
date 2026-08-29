@@ -14,6 +14,9 @@ export default function CostSummary({ summary, unavailable, onExplain }) {
   // lower bound rather than presenting it as complete.
   const unpriced = h.unpriced || { api_calls: 0, tokens: 0, models: [] }
   const hasUnpriced = unpriced.api_calls > 0
+  // A bot whose state.db was unreadable when this loaded is dropped from the
+  // merged totals -- the "All" figure is then a lower bound, same as unpriced.
+  const hasSkipped = summary.skipped_profiles?.length > 0
 
   return (
     <div className="cost-tiles">
@@ -25,7 +28,7 @@ export default function CostSummary({ summary, unavailable, onExplain }) {
         </span>
         <strong>
           {usd(summary.total_cost_of_ownership_usd)}
-          {(incomplete || hasUnpriced) && <span className="cost-warning">*</span>}
+          {(incomplete || hasUnpriced || hasSkipped) && <span className="cost-warning">*</span>}
         </strong>
         <span className="cost-tile-sub">
           {incomplete
@@ -41,7 +44,7 @@ export default function CostSummary({ summary, unavailable, onExplain }) {
       <div className="cost-tile">
         <span className="cost-tile-label">Hermes API cost <em>estimated</em></span>
         <strong>
-          {hasUnpriced && <span className="cost-warning" title="lower bound">≥ </span>}
+          {(hasUnpriced || hasSkipped) && <span className="cost-warning" title="lower bound">≥ </span>}
           {usd(h.cost_usd)}
         </strong>
         <span className="cost-tile-sub">

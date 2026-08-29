@@ -33,13 +33,14 @@ _KEY = ("session_id", "model", "task")
 _GROUPS = ("model", "platform")
 
 
-def apply_tick(rows: list[dict], *, path: str | None = None,
+def apply_tick(rows: list[dict], *, profile: str, path: str | None = None,
                observed_at: str | None = None) -> dict:
     observed_at = observed_at or datetime.now(timezone.utc).isoformat()
     with get_conn(path) as conn:
         marks = {
             (r["session_id"], r["model"], r["task"]): dict(r)
-            for r in conn.execute("SELECT * FROM usage_watermark")
+            for r in conn.execute(
+                "SELECT * FROM usage_watermark WHERE profile = ?", (profile,))
         }
         seeding = not marks
         written = 0
@@ -60,11 +61,11 @@ def apply_tick(rows: list[dict], *, path: str | None = None,
                     conn.execute(
                         f"""
                         INSERT INTO usage_ledger
-                            (observed_at, session_id, model, task, platform,
+                            (observed_at, profile, session_id, model, task, platform,
                              {", ".join(t for _, t in _COUNTERS)})
-                        VALUES (?, ?, ?, ?, ?, {", ".join("?" * len(_COUNTERS))})
+                        VALUES (?, ?, ?, ?, ?, ?, {", ".join("?" * len(_COUNTERS))})
                         """,
-                        (observed_at, *key, row.get("platform") or "",
+                        (observed_at, profile, *key, row.get("platform") or "",
                          *(deltas[t] for _, t in _COUNTERS)),
                     )
                     written += 1
@@ -72,19 +73,20 @@ def apply_tick(rows: list[dict], *, path: str | None = None,
             conn.execute(
                 f"""
                 INSERT INTO usage_watermark
-                    ({", ".join(_KEY)}, {", ".join(s for s, _ in _COUNTERS)})
-                VALUES ({", ".join("?" * (len(_KEY) + len(_COUNTERS)))})
-                ON CONFLICT(session_id, model, task) DO UPDATE SET
+                    (profile, {", ".join(_KEY)}, {", ".join(s for s, _ in _COUNTERS)})
+                VALUES ({", ".join("?" * (1 + len(_KEY) + len(_COUNTERS)))})
+                ON CONFLICT(profile, session_id, model, task) DO UPDATE SET
                     {", ".join(f"{s} = excluded.{s}" for s, _ in _COUNTERS)}
                 """,
-                (*key, *(row.get(s) or 0 for s, _ in _COUNTERS)),
+                (profile, *key, *(row.get(s) or 0 for s, _ in _COUNTERS)),
             )
         conn.commit()
     return {"seeded": seeding, "rows_written": written}
 
 
 def timeseries(*, path: str | None = None, days: int = 30,
-               group: str = "model", now_iso: str | None = None) -> dict:
+               group: str = "model", profile: str = "all",
+               now_iso: str | None = None) -> dict:
     if group not in _GROUPS:
         raise ValueError(f"group must be one of {_GROUPS}, got {group!r}")
     now = datetime.fromisoformat(now_iso) if now_iso else datetime.now(timezone.utc)
@@ -95,7 +97,13 @@ def timeseries(*, path: str | None = None, days: int = 30,
     # `group` is validated against a two-item tuple immediately above, so
     # interpolating it into the SQL cannot inject anything. Everything the
     # caller supplies still goes through a `?` placeholder.
+    def _profile_filter() -> tuple[str, list]:
+        """(SQL fragment, params) restricting to one profile -- empty for 'all'."""
+        return ("", []) if profile == "all" else ("profile = ?", [profile])
+
     with get_conn(path) as conn:
+        frag, frag_params = _profile_filter()
+        where = "observed_at >= ?" + (f" AND {frag}" if frag else "")
         rows = conn.execute(
             f"""
             SELECT SUBSTR(observed_at, 1, 10) AS day, {group} AS grp,
@@ -106,13 +114,15 @@ def timeseries(*, path: str | None = None, days: int = 30,
                    SUM(d_cache_write) AS cache_write_tokens,
                    SUM(d_cost_usd)    AS cost_usd
             FROM usage_ledger
-            WHERE observed_at >= ?
+            WHERE {where}
             GROUP BY day, grp
             ORDER BY day ASC
             """,
-            (cutoff_iso,),
+            [cutoff_iso, *frag_params],
         ).fetchall()
-        first = conn.execute("SELECT MIN(observed_at) AS first FROM usage_ledger").fetchone()
+        first_q = "SELECT MIN(observed_at) AS first FROM usage_ledger" + (
+            f" WHERE {frag}" if frag else "")
+        first = conn.execute(first_q, frag_params).fetchone()
 
     points = [
         {"day": r["day"], "group": r["grp"], "cost_usd": r["cost_usd"],
@@ -127,10 +137,11 @@ def timeseries(*, path: str | None = None, days: int = 30,
     }
 
 
-def run_once(*, path: str | None = None, data_dir: str | None = None) -> dict:
-    """One poll cycle. Never raises: an absent mount, a torn snapshot copy or a
-    locked database are all expected on a small VPS, and the poller must not
-    take the app down with it. The next tick retries five minutes later."""
+def run_once(*, profile: str, data_dir: str, path: str | None = None) -> dict:
+    """One poll cycle for one profile. Never raises: an absent mount, a torn
+    snapshot copy or a locked database are all expected on a small VPS, and the
+    poller must not take the app down with it. The next tick retries five
+    minutes later."""
     try:
         rows = hermes_usage.read_usage_rows(data_dir)
     except hermes_usage.HermesDataUnavailable as exc:
@@ -140,7 +151,25 @@ def run_once(*, path: str | None = None, data_dir: str | None = None) -> dict:
         _log.warning("ledger tick failed reading state.db: %s", exc)
         return {"skipped": str(exc)}
     try:
-        return apply_tick(rows, path=path)
+        return apply_tick(rows, profile=profile, path=path)
     except Exception as exc:
         _log.warning("ledger tick failed writing gui.db: %s", exc)
         return {"skipped": str(exc)}
+
+
+def run_all(*, path: str | None = None) -> dict:
+    """One poll cycle across every discovered profile. Never raises."""
+    from app import profiles
+    try:
+        discovered = profiles.list_profiles()
+    except Exception as exc:
+        _log.warning("ledger fan-out skipped: profile discovery failed: %s", exc)
+        return {}
+    results = {}
+    for p in discovered:
+        try:
+            results[p["key"]] = run_once(profile=p["key"], data_dir=p["data_dir"], path=path)
+        except Exception as exc:  # defense in depth -- run_once shouldn't raise
+            _log.warning("ledger tick crashed for profile %s: %s", p["key"], exc)
+            results[p["key"]] = {"skipped": str(exc)}
+    return results

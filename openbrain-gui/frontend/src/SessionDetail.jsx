@@ -2,15 +2,16 @@ import { useEffect, useState } from 'react'
 import { api } from './api'
 import { usd, tokens } from './format'
 
-export default function SessionDetail({ sessionId, onClose }) {
+export default function SessionDetail({ sessionId, profile, onClose }) {
   const [detail, setDetail] = useState(null)
   const [error, setError] = useState(null)
   const [showPrompt, setShowPrompt] = useState(false)
 
   useEffect(() => {
     setDetail(null); setError(null); setShowPrompt(false)
-    api.getCostSession(sessionId).then(setDetail).catch((e) => setError(e.message))
-  }, [sessionId])
+    // `profile` must be a concrete bot key here -- the endpoint 400s on `all`.
+    api.getCostSession(sessionId, profile).then(setDetail).catch((e) => setError(e.message))
+  }, [sessionId, profile])
 
   return (
     <div className="session-detail">

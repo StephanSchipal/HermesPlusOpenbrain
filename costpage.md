@@ -9,6 +9,7 @@ Live since 2026-07-31 at `https://gui.<vps-host>.hstgr.cloud` — reachable from
 - Design spec — [`docs/superpowers/specs/2026-07-31-openbrain-gui-cost-page-design.md`](docs/superpowers/specs/2026-07-31-openbrain-gui-cost-page-design.md)
 - Implementation plan — [`docs/superpowers/plans/2026-07-31-openbrain-gui-cost-page.md`](docs/superpowers/plans/2026-07-31-openbrain-gui-cost-page.md)
 - Original requirements — [`planCost.md`](planCost.md)
+- Per-bot view (2026-08-28) — [`docs/superpowers/specs/2026-08-28-openbrain-gui-cost-page-profiles-design.md`](docs/superpowers/specs/2026-08-28-openbrain-gui-cost-page-profiles-design.md) · [`docs/superpowers/plans/2026-08-28-openbrain-gui-cost-page-profiles.md`](docs/superpowers/plans/2026-08-28-openbrain-gui-cost-page-profiles.md)
 
 ---
 
@@ -43,10 +44,12 @@ everything in the Part 1 table above — summary tiles, by-model/by-platform/top
 top tools, prompt budget — for whichever range was selected when you saved it. The **Spend over
 time** chart is deliberately *not* part of a saved report; it always shows live data, saved or not.
 
-**Naming is automatic**, not typed: `CostReport_{days}_{date}`, e.g. `CostReport_01_02.08.2026` for
-Today, `CostReport_07_26.07.2026-02.08.2026` for 7 days. Saving again under the same name — same day,
+**Naming is automatic**, not typed: `CostReport_{profile}_{days}_{date}`, e.g.
+`CostReport_all_01_02.08.2026` for Today across all bots, `CostReport_openbrain_07_26.07.2026-02.08.2026`
+for 7 days scoped to the `openbrain` bot. Saving again under the same name — same bot, same day,
 same range — **overwrites** the earlier snapshot rather than creating a duplicate; there is no rename
-step, so a report's name doubles as "when and over what range this was taken".
+step, so a report's name doubles as "which bot, when, and over what range this was taken". Reports
+saved before the per-bot view keep their old `CostReport_{days}_{date}` names and still load.
 
 **Load stored report** opens a list of everything saved. Picking one replaces Part 1 in place with a
 banner — *"Viewing saved report: NAME (saved ...) — back to live"* — rather than opening a separate
@@ -62,6 +65,36 @@ model was built specifically to make that workflow simple, not to replace it.
 A spreadsheet for everything Hermes doesn't know about — the VPS bill, the Anthropic invoice,
 anything else. Columns: Name, Period, `$`, `€`, URL, Comments, and a "compare to estimate"
 checkbox. Buttons: **Add row**, **Delete row** (acts on the radio-selected row), **Save**.
+
+### Per-bot view (2026-08-28)
+
+Hermes now runs several bots, each its own profile with its own `state.db`
+(`default` → **Hermes-Agent**, plus `openbrain`, `master`, `coder`, `designer`, `researcher`,
+`writer`, …). A **bot dropdown** sits next to the date-range buttons.
+
+- **"All" (the default)** — every Part 1 panel shows the summed-across-all-bots numbers, plus two
+  extra tables: **Cost by bot** (Bot · sessions · calls · tokens · cost · % — click a row to jump
+  to that bot) and **Config by bot** (each bot's `model.default`, `compression.threshold`,
+  `compression.threshold_tokens`, `cache_ttl`, `max_turns`, `disabled_toolsets`, `retention_days`
+  side by side). The **Top
+  spenders** table gains a **Bot** column so you can see which bot a session belongs to.
+- **Picking a specific bot** scopes every panel — tiles, tables, chart, drill-down — to that bot's
+  `state.db`. The Bot column disappears; the Config panel returns to the single key/value form.
+- **Total cost of ownership and the estimate-vs-invoice check stay fleet-wide** regardless of the
+  dropdown — the Anthropic invoice and the VPS bill cover every bot, not the one selected. Only
+  the "Hermes API cost / API calls / Cache hit rate" tiles follow the dropdown.
+- **Merges sum raw counters and recompute** the derived figures (cache-hit-rate, per-call
+  averages, weighted-mean prompt sizes) — never an average of averages, so "All" and a single bot
+  compute a rate the same way.
+- **A bot whose `state.db` is momentarily unreadable** is skipped from the merged totals (its key
+  is listed in the response's `skipped_profiles`, so a partial total can be flagged) and shown as
+  an `(unavailable)` row in the two by-bot tables — one bad `state.db` never blanks the page.
+- The per-bot `state.db` (and `hermes insights` run inside a given profile) remains the source of
+  truth for a single bot; "All" is a client-side sum over the same reads.
+
+Saved-report names now carry the bot: `CostReport_<profile>_<days>_<date>` (e.g.
+`CostReport_openbrain_07_26.07.2026-02.08.2026`, `CostReport_all_30_...`). Reports saved before
+this change keep their old `CostReport_<days>_<date>` names and still load.
 
 ---
 
@@ -285,8 +318,10 @@ agent.disabled_toolsets    sessions.auto_prune        sessions.retention_days
 
 | Module | Responsibility |
 |---|---|
-| `hermes_usage.py` | Snapshot + read `state.db`; all aggregations; config whitelist |
-| `ledger_store.py` | Poll tick (diff vs. watermark), time-series queries |
+| `hermes_usage.py` | Snapshot + read one bot's `state.db` (`data_dir` arg); all aggregations; config whitelist |
+| `profiles.py` | Discover Hermes bots from the filesystem (`list_profiles()`, `resolve(key)`); the `"all"` sentinel |
+| `cost_merge.py` | The "All" path — loop every bot's `hermes_usage` reads and sum/recompute; `summary_all`, `dashboard_all`, `per_bot_breakdown`, `config_all` |
+| `ledger_store.py` | Poll tick per bot (`run_all` fans out), diff vs. watermark, time-series queries filtered by `profile` |
 | `external_costs_store.py` | Part 2 CRUD, period maths, currency derivation, single-flag invariant |
 | `fx.py` | USD→EUR rate: fetch, cache, manual override |
 | `cost_reports_store.py` | Save/load report snapshots, keyed by name (upsert on conflict) |
@@ -294,6 +329,14 @@ agent.disabled_toolsets    sessions.auto_prune        sessions.retention_days
 ### 4.5 gui.db tables
 
 `external_costs` · `fx_rate` (single row) · `usage_ledger` · `usage_watermark` · `cost_reports`
+
+`usage_ledger` and `usage_watermark` carry a **`profile` column** (added 2026-08-28;
+`usage_watermark`'s primary key is `(profile, session_id, model, task)`). `init_db()` runs a small
+idempotent migration: an existing deployed `gui.db` gets the column added and its watermark table
+rebuilt with the new key, all existing rows stamped `profile = 'default'` (they were the root
+profile's). The first poll tick after the upgrade seeds a watermark for each newly-discovered bot
+and emits no deltas, so a new bot's `Spend over time` starts at "collecting since &lt;today&gt;"
+rather than dumping its short history as a spike.
 
 `cost_reports` stores the snapshot payload as an opaque JSON blob (`name TEXT PRIMARY KEY`), not
 structured columns — the comparison workflow (§ "Saving and comparing reports" above) is "load it
@@ -308,11 +351,13 @@ place on next start. Existing saved prompts and delete-log rows are untouched.
 ## 5. API
 
 ```
-GET    /api/cost/dashboard?days=30&limit=50   every Part 1 panel, one snapshot
-GET    /api/cost/summary?days=30              combined TCO + estimate-vs-invoice
-GET    /api/cost/session/{id}                 drill-down (404 if unknown)
-GET    /api/cost/config                       whitelisted config.yaml keys
-GET    /api/cost/timeseries?days=30&group=model|platform
+GET    /api/cost/profiles                     [{key,label}] of every bot; [] if no mount
+GET    /api/cost/by-bot?days=30               per-bot breakdown table (never 503 — unavailable rows)
+GET    /api/cost/dashboard?days=30&limit=50&profile=all   every Part 1 panel, one snapshot per bot
+GET    /api/cost/summary?days=30&profile=all  selected-bot tiles + fleet-wide TCO/estimate-vs-invoice
+GET    /api/cost/session/{id}?profile=<bot>   drill-down (404 unknown id; 400 if profile "all"/absent)
+GET    /api/cost/config?profile=all           per-bot table for "all", whitelisted keys for a bot
+GET    /api/cost/timeseries?days=30&group=model|platform&profile=all
 
 GET    /api/cost/external                     rows + totals + rate
 PUT    /api/cost/external                     upsert (never deletes — see below)
@@ -325,6 +370,16 @@ GET    /api/cost/reports                      list saved reports (name/days/rang
 GET    /api/cost/reports/{name}                full report incl. payload (404 if unknown)
 PUT    /api/cost/reports/{name}               save/overwrite (body: days, range_label, payload)
 ```
+
+**`?profile=`** defaults to `all` on every route that takes it. `all` routes through `cost_merge`
+(the sum-across-bots path); a specific key resolves that bot's data dir and reads its `state.db`.
+An **unknown key is `404`** on `dashboard`/`config`/`session`/`summary`; `timeseries` does not 404
+(it reads `gui.db`'s ledger, so an unknown key just filters to no rows). `/api/cost/config` for a
+readable bot with **no `config.yaml`** is `503`; the same bot inside `?profile=all` is a row with
+`unavailable: true` — the merge path tolerates gaps, a single-bot read does not.
+
+With the **mount absent entirely**, `/api/cost/config` returns `200 []` (an empty bot list —
+`config_all` has no profiles to enumerate), unlike `/dashboard` and `/summary`, which still `503`.
 
 **`PUT /api/cost/external` is upsert-only** and deliberately does not delete rows absent from the
 payload — the Save button always sends the whole visible grid, and removing a row is a separate

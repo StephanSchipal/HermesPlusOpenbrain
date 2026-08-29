@@ -80,6 +80,15 @@ Hermes API estimate = SUM(estimated_cost_usd)
               Every row in this range carries a price, so nothing is silently counted as free.
             </p>
           )}
+
+          {summary.skipped_profiles?.length > 0 && (
+            <p className="cost-warning">
+              {summary.skipped_profiles.length} bot
+              {summary.skipped_profiles.length === 1 ? ' was' : 's were'} unreadable when this
+              loaded and {summary.skipped_profiles.length === 1 ? 'is' : 'are'} not in these
+              totals: {summary.skipped_profiles.join(', ')}. Reload to retry.
+            </p>
+          )}
         </div>
 
         <div className="popup-actions">

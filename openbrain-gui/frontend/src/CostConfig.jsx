@@ -1,3 +1,17 @@
+// Columns for the per-bot config table (profile === 'all'). Keys match what
+// the backend puts on each row alongside `key`/`label`/`unavailable`.
+const CONFIG_COLUMNS = [
+  'model.default', 'compression.threshold', 'compression.threshold_tokens',
+  'prompt_caching.cache_ttl', 'agent.max_turns', 'agent.disabled_toolsets',
+  'sessions.retention_days',
+]
+
+function fmt(v) {
+  if (Array.isArray(v)) return v.join(', ')
+  if (v === undefined || v === null) return '—'
+  return String(v)
+}
+
 const CONFIG_NOTES = {
   'model.default': 'Opus costs roughly 2.5× Sonnet per token.',
   'compression.threshold': 'Fraction of the model context window before compaction runs.',
@@ -52,18 +66,39 @@ export default function CostConfig({ tools, promptBudget, config }) {
 
       <section className="cost-table-block">
         <h4>Config</h4>
-        <table className="cost-table">
-          <thead><tr><th>Key</th><th>Value</th><th>What it costs</th></tr></thead>
-          <tbody>
-            {Object.entries(config || {}).map(([key, value]) => (
-              <tr key={key}>
-                <td><code>{key}</code></td>
-                <td>{JSON.stringify(value)}</td>
-                <td className="cost-note">{CONFIG_NOTES[key] || ''}</td>
+        {Array.isArray(config) ? (
+          <table className="cost-table">
+            <thead>
+              <tr>
+                <th>Bot</th>
+                {CONFIG_COLUMNS.map((c) => <th key={c}>{c}</th>)}
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {config.map((row) => (
+                <tr key={row.key}>
+                  <td>{row.label || row.key}{row.unavailable ? ' (unavailable)' : ''}</td>
+                  {CONFIG_COLUMNS.map((c) => (
+                    <td key={c}>{row.unavailable ? '—' : fmt(row[c])}</td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        ) : (
+          <table className="cost-table">
+            <thead><tr><th>Key</th><th>Value</th><th>What it costs</th></tr></thead>
+            <tbody>
+              {Object.entries(config || {}).map(([key, value]) => (
+                <tr key={key}>
+                  <td><code>{key}</code></td>
+                  <td>{JSON.stringify(value)}</td>
+                  <td className="cost-note">{CONFIG_NOTES[key] || ''}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
       </section>
     </div>
   )
