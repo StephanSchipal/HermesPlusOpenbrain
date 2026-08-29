@@ -24,7 +24,7 @@ infrastructure you already own.
 | 5 | Wire Hermes-Agent to call `openbrain-mcp` | ✅ Done |
 | 6 | Connect Claude Desktop / Claude Code | ✅ Done |
 | 7 | End-to-end acceptance on the real stack | ✅ Done |
-| 8 | Cost & token usage page — see [`costpage.md`](costpage.md) | ✅ Live 2026-07-31, saved reports added 2026-08-02 |
+| 8 | Cost & token usage page — see [`costpage.md`](costpage.md) | ✅ Live 2026-07-31; saved reports 2026-08-02; per-bot view 2026-08-29 |
 
 Full details, every design decision, and a running log of bugs found/fixed during implementation:
 - Design spec — [`docs/superpowers/specs/2026-06-30-hermes-openbrain-memory-design.md`](docs/superpowers/specs/2026-06-30-hermes-openbrain-memory-design.md)
@@ -439,9 +439,15 @@ In short:
   rate refresh, billing URL, comments. Flag one row as your real Anthropic invoice and the page
   shows it against Hermes' own estimate.
 - **Save report / Load stored report** (added 2026-08-02) snapshot Part 1 into `gui.db` under a
-  deterministic name (`CostReport_07_26.07.2026-02.08.2026`, …) and can reload it later in place,
-  with a "back to live" banner — comparing two ranges just means loading each in its own browser
-  window. Details in `costpage.md`.
+  deterministic name (`CostReport_all_07_26.07.2026-02.08.2026`, …) and can reload it later in
+  place, with a "back to live" banner — comparing two ranges just means loading each in its own
+  browser window. Details in `costpage.md`.
+- **Per-bot view** (added 2026-08-29) — Hermes now runs several bots, each its own profile with
+  its own `state.db`. A bot dropdown next to the range buttons: **All** merges every bot's spend
+  into the panels and adds a *Cost by bot* + *Config by bot* table; picking a bot scopes the whole
+  page to it. Total-cost-of-ownership and the estimate-vs-invoice check stay fleet-wide (the
+  invoice covers every bot). No compose change — the named profiles' `state.db` files are already
+  under the existing `/hermes-data` mount.
 
 Three data facts shape the design, and the page states each rather than hiding it: Hermes stores
 **lifetime totals per session** (so a 5-minute poller samples deltas into `gui.db` to build a real
@@ -457,6 +463,8 @@ Deploy needs one extra volume on `openbrain-gui`:
 
 Design spec — [`docs/superpowers/specs/2026-07-31-openbrain-gui-cost-page-design.md`](docs/superpowers/specs/2026-07-31-openbrain-gui-cost-page-design.md) ·
 plan — [`docs/superpowers/plans/2026-07-31-openbrain-gui-cost-page.md`](docs/superpowers/plans/2026-07-31-openbrain-gui-cost-page.md).
+Per-bot view — [spec](docs/superpowers/specs/2026-08-28-openbrain-gui-cost-page-profiles-design.md) ·
+[plan](docs/superpowers/plans/2026-08-28-openbrain-gui-cost-page-profiles.md).
 A follow-up **Spec B** (action buttons via a whitelisted command bridge, and a switchable
 per-request logger) is designed but not built — see `costpage.md` §7.
 
