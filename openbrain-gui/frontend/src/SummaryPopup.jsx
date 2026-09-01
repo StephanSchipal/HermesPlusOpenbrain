@@ -27,6 +27,10 @@ export default function SummaryPopup({ row, onClose }) {
           </div>
         </div>
         <p className="popup-summary-text">{text}</p>
+        <label>
+          Keywords
+          <p className="popup-keywords">{row.keywords.join(', ')}</p>
+        </label>
         <div className="popup-actions">
           <button onClick={onClose}>Close</button>
         </div>
