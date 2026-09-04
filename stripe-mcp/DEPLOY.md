@@ -65,14 +65,16 @@ $EDITOR deploy/.env
 ```bash
 cd deploy
 docker compose -f docker-compose.stripe.yml up -d --build
-docker compose -f docker-compose.stripe.yml ps          # healthy?
+docker compose -f docker-compose.stripe.yml ps          # healthy? (project name: stripe)
 docker exec hermes-agent-7qpk-hermes-agent-1 \
   python -c "import urllib.request;print(urllib.request.urlopen('http://stripe-mcp:8080/health').read())"
 ```
 
-The `hermes_net` / `hermes-agent-7qpk_default` external network is already
-created by the Hermes stack (same as openbrain). If compose complains it's
-missing, the Hermes stack isn't up.
+The compose file sets `name: stripe`, so its containers are `stripe-stripe-mcp-1`
+and it stays isolated from the `deploy`-project openbrain stack (both are rooted
+in `deploy/`). The `hermes-agent-7qpk_default` external network is created by the
+Hermes stack (same as openbrain); if compose says it's missing, the Hermes stack
+isn't up.
 
 ## 4. Register with Hermes (`default` profile, in-container)
 
@@ -144,7 +146,7 @@ the step 4 verify block after the next Hermes image update** (see
 
 ```bash
 docker exec hermes-agent-7qpk-hermes-agent-1 hermes -p default mcp remove stripe
-cd deploy && docker compose -f docker-compose.stripe.yml down
+cd deploy && docker compose -f docker-compose.stripe.yml down   # project: stripe
 # revoke the restricted key in the Stripe dashboard
 ```
 

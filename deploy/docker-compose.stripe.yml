@@ -6,6 +6,12 @@
 #
 # Unlike openbrain, this service is NOT exposed publicly -- no Traefik labels.
 # Hermes reaches it in-cluster as `stripe-mcp:8080`; nothing else needs to.
+#
+# Own compose project name so it doesn't collide with the openbrain stack (also
+# rooted in deploy/). Without this, `docker compose ... --remove-orphans` on
+# either stack would tear down the other's containers.
+name: stripe
+
 services:
   stripe-mcp:
     build: ../stripe-mcp
