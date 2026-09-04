@@ -1,153 +1,167 @@
 # Deploying stripe-mcp to the Hermes-Agent VPS
 
-Target: `srv1608402.hstgr.cloud`, container `hermes-agent-7qpk-hermes-agent-1`,
-`default` profile only. Mirrors the `openbrain-mcp` deployment
-(`README.md` Phase 4–5). **Nothing here is run until Stephan says go.**
+**Status: DONE & LIVE since 2026-09-04.** Running on
+`srv1608402.hstgr.cloud`, `default` profile only. This file is now the
+redeploy / rollback / post-update runbook — steps below record what was
+actually done, not a fresh-install script.
+
+- Container `stripe-stripe-mcp-1`, image `stripe-stripe-mcp`, compose project
+  **`stripe`**, file `deploy/docker-compose.stripe.yml`.
+- On network `hermes-agent-7qpk_default`, reachable as `stripe-mcp:8080`. No
+  Traefik, no public exposure.
+- Live `rk_live_…` restricted key (Read scopes), `STRIPE_MODE=live`, account
+  `acct_1Ty7rvJNkij86mLT`.
+- Registered on `default` via a direct edit of the root
+  `$HERMES_HOME/config.yaml` (see §4). Host backup:
+  `config.yaml.pre-stripe-20260904`.
 
 ---
 
-## 0. Prerequisite you do in the Stripe dashboard
+## 0. Stripe dashboard prerequisite
 
-Create a **Restricted API key** (Developers → API keys → Create restricted key):
+**Restricted API key** (Developers → API keys → Create restricted key), scopes:
 
 | Resource | Permission |
 |---|---|
-| Customers | **Read** |
-| Charges | **Read** |
-| Disputes | **Read** |
-| Subscriptions | **Read** |
-| Invoices | **Read** |
-| Balance | **Read** |
+| Customers, Charges, Disputes, Subscriptions, Invoices, Balance | **Read** |
 | Products / Prices / Plans | Read (for `revenue_analytics`) |
 | **Everything else** | **None** |
 
-Make one in **test mode** (`rk_test_…`) now; make the **live** one (`rk_live_…`)
-only after step 4 passes. Never paste either key into chat — put it straight
-into `deploy/.env` on the VPS.
+Never paste the key into chat — put it straight into `deploy/.env` on the VPS.
+Bearer token: `openssl rand -hex 32` → `STRIPE_MCP_TOKEN`.
 
-Generate the bearer token: `openssl rand -hex 32` → `STRIPE_MCP_TOKEN`.
-
----
+> **Gotcha (hit on first deploy):** `.env` ended up with the literal string
+> `STRIPE_MCP_TOKEN=<openssl rand -hex 32>` instead of a generated value.
+> `hermes mcp test` still passed because the container and Hermes read the same
+> bogus string from the same file. Generate a real value; it must be identical
+> in **`deploy/.env`** *and* in `config.yaml`'s `Authorization: Bearer …` line.
 
 ## 1. Local verification (laptop)
 
 ```bash
 cd stripe-mcp
 pip install -e ".[dev]"
-pytest -q
-# then, against real test data:
-STRIPE_API_KEY=rk_test_... STRIPE_MODE=test STRIPE_MCP_TOKEN=dev python -m app.server &
-curl -s localhost:8080/health
-curl -s -H "Authorization: Bearer dev" -X POST localhost:8080/mcp \
-  -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
-  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}' | head
+pytest -q                       # 9 passed, mock mode, no Stripe account needed
+STRIPE_MCP_TOKEN=dev python -m app.server &
+curl -s localhost:8080/health   # -> {"ok":true,...,"read_only":true}
 ```
 
-Expect: health `read_only:true`; `tools/list` returns the 10 read tools, no
-write verbs.
+(A bare `tools/list` curl returns HTTP 400 — the MCP streamable-HTTP protocol
+needs an `initialize` handshake first. `pytest`'s
+`test_registered_tools_are_read_only` checks the tool set properly; the real
+end-to-end check is `hermes mcp test stripe` in §4.)
 
-## 2. Ship the code to the VPS
+## 2. Ship code + env to the VPS
 
 ```bash
 ssh root@srv1608402.hstgr.cloud
-cd /path/to/HermesPlusOpenbrain   # same checkout the openbrain stack deploys from
-git pull
+cd /root/HermesPlusOpenbrain
+git pull --ff-only
 # add to the SAME deploy/.env the openbrain stack uses:
-#   STRIPE_API_KEY=rk_test_...
-#   STRIPE_MODE=test
-#   STRIPE_MCP_TOKEN=<hex from openssl>
+#   STRIPE_API_KEY=rk_live_...        (restricted, Read scopes)
+#   STRIPE_MODE=live
+#   STRIPE_MCP_TOKEN=<real openssl rand -hex 32>
 #   STRIPE_DEFAULT_CURRENCY=EUR
 $EDITOR deploy/.env
 ```
 
-## 3. Bring up the container (test mode)
+## 3. Bring up the container
 
 ```bash
-cd deploy
+cd /root/HermesPlusOpenbrain/deploy
 docker compose -f docker-compose.stripe.yml up -d --build
-docker compose -f docker-compose.stripe.yml ps          # healthy? (project name: stripe)
+docker compose -f docker-compose.stripe.yml ps                 # project: stripe
 docker exec hermes-agent-7qpk-hermes-agent-1 \
   python -c "import urllib.request;print(urllib.request.urlopen('http://stripe-mcp:8080/health').read())"
+# -> {"ok":true,"service":"stripe-mcp","mode":"live","mock":false,"read_only":true}
+docker logs stripe-stripe-mcp-1 2>&1 | grep -i "connectivity ok"   # confirms the key reaches Stripe
 ```
 
-The compose file sets `name: stripe`, so its containers are `stripe-stripe-mcp-1`
-and it stays isolated from the `deploy`-project openbrain stack (both are rooted
-in `deploy/`). The `hermes-agent-7qpk_default` external network is created by the
-Hermes stack (same as openbrain); if compose says it's missing, the Hermes stack
-isn't up.
+The compose file sets `name: stripe`, keeping it isolated from the
+`deploy`-project openbrain stack (both rooted in `deploy/`). The
+`hermes-agent-7qpk_default` external network is created by the Hermes stack.
 
-## 4. Register with Hermes (`default` profile, in-container)
+## 4. Register with Hermes — `default` profile only
 
-`hermes mcp add`'s `--header` flag has a history of not persisting on this
-setup (README Phase 6). **First check the syntax the installed version wants:**
+`hermes mcp add … --auth header` (this Hermes version, v0.20.5) has **no flag
+to pass the header value** — it wants a TTY prompt. So registration is a direct
+edit of the root config, which is what `hermes mcp configure` writes anyway and
+is the same shape `openbrain`'s entry has (which survives recreates).
+
+Root config = `$HERMES_HOME/config.yaml` (`/opt/data/config.yaml`, persistent;
+host path `/docker/hermes-agent-7qpk/data/config.yaml`). **`default` == this
+file; every other profile (`master`, `coder`, `designer`, `researcher`,
+`writer`, `openbrain`) has its own `mcp_servers:` block and does not inherit.**
+
+Add under `mcp_servers:` (token = the real `STRIPE_MCP_TOKEN` from `deploy/.env`):
+
+```yaml
+mcp_servers:
+  stripe:
+    url: http://stripe-mcp:8080/mcp
+    headers:
+      Authorization: Bearer <STRIPE_MCP_TOKEN>
+  openbrain:
+    ...
+```
+
+Back up first: `cp config.yaml config.yaml.pre-stripe-$(date +%Y%m%d)`.
+Then pick the gateway up:
 
 ```bash
-docker exec hermes-agent-7qpk-hermes-agent-1 hermes mcp add --help
+docker exec hermes-agent-7qpk-hermes-agent-1 /command/s6-svc -r /run/service/gateway-default
 ```
 
-Preferred (HTTP transport, bearer header):
-
-```bash
-docker exec hermes-agent-7qpk-hermes-agent-1 \
-  hermes -p default mcp add stripe \
-    --transport http \
-    --url http://stripe-mcp:8080/mcp \
-    --header "Authorization: Bearer <STRIPE_MCP_TOKEN>"
-```
-
-If the header doesn't stick, use the interactive configurator (what actually
-worked for openbrain):
-
-```bash
-ssh root@srv1608402.hstgr.cloud -t \
-  'docker exec -it hermes-agent-7qpk-hermes-agent-1 hermes -p default mcp configure'
-```
-
-Verify:
+### Verify
 
 ```bash
 docker exec hermes-agent-7qpk-hermes-agent-1 hermes -p default mcp list      # stripe ✓ enabled
-docker exec hermes-agent-7qpk-hermes-agent-1 hermes mcp test stripe          # Connected, 10 tools
+docker exec hermes-agent-7qpk-hermes-agent-1 hermes mcp test stripe          # ✓ Connected, 10 tools
 docker exec hermes-agent-7qpk-hermes-agent-1 \
-  hermes -p default chat -q "using the stripe tools, what's my current balance and MRR?"
-docker exec hermes-agent-7qpk-hermes-agent-1 \
-  hermes -p default chat -q "list my most recent stripe charges"
+  hermes -p default chat -q "use the stripe tools — current balance, active subscriptions, customer count?"
+docker exec hermes-agent-7qpk-hermes-agent-1 hermes -p openbrain mcp list    # NO stripe
+# negative check — wrong bearer must 401:
+docker exec hermes-agent-7qpk-hermes-agent-1 python3 -c \
+ 'import urllib.request as u
+r=u.Request("http://stripe-mcp:8080/mcp",data=b"{}",headers={"Authorization":"Bearer wrong","Content-Type":"application/json"})
+try: u.urlopen(r); print("NO 401 - BAD")
+except u.HTTPError as e: print("status",e.code)'
 ```
 
-Confirm `openbrain` profile did **not** get it:
+## 5. Rotating the token / swapping the key
+
+Both sides must change together:
 
 ```bash
-docker exec hermes-agent-7qpk-hermes-agent-1 hermes -p openbrain mcp list     # no stripe
-```
-
-## 5. Go live
-
-```bash
-$EDITOR deploy/.env      # STRIPE_API_KEY=rk_live_...  ;  STRIPE_MODE=live
+NEWTOK=$(openssl rand -hex 32)
+cd /root/HermesPlusOpenbrain
+sed -i "s#^STRIPE_MCP_TOKEN=.*#STRIPE_MCP_TOKEN=$NEWTOK#" deploy/.env
+# edit the Bearer line in /docker/hermes-agent-7qpk/data/config.yaml to match
 cd deploy && docker compose -f docker-compose.stripe.yml up -d --force-recreate
-docker exec hermes-agent-7qpk-hermes-agent-1 \
-  python -c "import urllib.request;print(urllib.request.urlopen('http://stripe-mcp:8080/health').read())"   # mode=live, mock=false
+docker exec hermes-agent-7qpk-hermes-agent-1 /command/s6-svc -r /run/service/gateway-default
 docker exec hermes-agent-7qpk-hermes-agent-1 hermes mcp test stripe
-docker exec hermes-agent-7qpk-hermes-agent-1 \
-  hermes -p default chat -q "what's my real stripe balance right now?"
 ```
 
-## 6. Survives updates?
+Swapping the Stripe key: edit `STRIPE_API_KEY` in `deploy/.env`, then
+`docker compose -f docker-compose.stripe.yml up -d --force-recreate`. No
+config.yaml or gateway change needed.
 
-The openbrain MCP registration did **not** survive a Hermes container restart
-via host `config.yaml` edits — it had to be set through `hermes mcp` tooling
-(README Phase 5). Because step 4 uses `hermes mcp` in-container (writing
-Hermes's own source of truth), it should persist like openbrain's did. **Re-run
-the step 4 verify block after the next Hermes image update** (see
-`project-hermes-agent-voice-update` memory for that procedure) and after one
-`docker compose ... up --force-recreate hermes-agent`.
+## 6. After a Hermes image update or `--force-recreate hermes-agent`
+
+`openbrain`'s `config.yaml` entry has survived container recreates, and
+`stripe`'s is the same shape in the same persistent file, so it should persist
+too — but **re-run the §4 verify block** after the next Hermes image update
+(procedure: `project-hermes-agent-voice-update` memory). If the `stripe:` block
+is gone from `config.yaml`, re-add it and restart `gateway-default`.
 
 ## Rollback
 
 ```bash
-docker exec hermes-agent-7qpk-hermes-agent-1 hermes -p default mcp remove stripe
-cd deploy && docker compose -f docker-compose.stripe.yml down   # project: stripe
+# remove the stripe: block from /docker/hermes-agent-7qpk/data/config.yaml
+#   (or: docker exec ... hermes -p default mcp remove stripe)
+docker exec hermes-agent-7qpk-hermes-agent-1 /command/s6-svc -r /run/service/gateway-default
+cd /root/HermesPlusOpenbrain/deploy && docker compose -f docker-compose.stripe.yml down   # project: stripe
 # revoke the restricted key in the Stripe dashboard
 ```
 
-Nothing else in the Hermes stack references `stripe-mcp`; removing it is clean.
+Nothing else in the Hermes stack references `stripe-mcp`; removal is clean.

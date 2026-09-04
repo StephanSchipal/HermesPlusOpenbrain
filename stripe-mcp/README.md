@@ -6,6 +6,9 @@ charges, subscriptions, disputes, balance, MRR, Austrian VAT) — it **cannot**
 move money, issue refunds, cancel subscriptions, create customers, or generate
 checkout/payment links.
 
+**Status: live since 2026-09-04** on `srv1608402.hstgr.cloud`, `default` profile
+only. Runbook: [`DEPLOY.md`](DEPLOY.md).
+
 ## Provenance
 
 Vendored and adapted from **[github.com/sandraschi/stripe-mcp](https://github.com/sandraschi/stripe-mcp)**
