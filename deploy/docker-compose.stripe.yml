@@ -1,0 +1,33 @@
+# deploy/docker-compose.stripe.yml
+#
+# Read-only Stripe MCP for the Hermes-Agent `default` profile.
+# Deployed the same way as docker-compose.openbrain.yml: on the VPS, from a
+# git checkout, with deploy/.env filled in. See stripe-mcp/DEPLOY.md.
+#
+# Unlike openbrain, this service is NOT exposed publicly -- no Traefik labels.
+# Hermes reaches it in-cluster as `stripe-mcp:8080`; nothing else needs to.
+services:
+  stripe-mcp:
+    build: ../stripe-mcp
+    restart: unless-stopped
+    environment:
+      # Restricted key, READ scopes only (see DEPLOY.md). rk_test_... first,
+      # rk_live_... after test-mode verification.
+      STRIPE_API_KEY: ${STRIPE_API_KEY:-rk_test_mock_key_for_development}
+      STRIPE_MODE: ${STRIPE_MODE:-test}
+      STRIPE_READ_ONLY: "true"
+      # Bearer token Hermes must send. Long random string, URL-safe.
+      STRIPE_MCP_TOKEN: ${STRIPE_MCP_TOKEN}
+      STRIPE_DEFAULT_CURRENCY: ${STRIPE_DEFAULT_CURRENCY:-EUR}
+    networks:
+      - hermes_net   # reachable by Hermes as `stripe-mcp:8080`
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request;urllib.request.urlopen('http://localhost:8080/health')\""]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+networks:
+  hermes_net:
+    external: true
+    name: hermes-agent-7qpk_default
