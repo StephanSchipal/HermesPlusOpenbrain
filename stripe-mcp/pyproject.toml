@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=68.0.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "stripe-mcp"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = [
+    # Same pin rationale as openbrain-mcp: mcp 2.0.0 is a breaking release and
+    # this VPS has been bitten by an unpinned jump before. Keep server + Hermes
+    # client on the same major deliberately.
+    "mcp>=1.2.0,<2",
+    # Official Stripe SDK. Upper-bounded so a future major can't land silently
+    # in a rebuilt image (v12 dropped resource-level helpers this code uses).
+    "stripe>=8.0.0,<12",
+    "uvicorn>=0.30.0",
+    "starlette>=0.37.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0.0"]
+
+[tool.setuptools]
+packages = ["app"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
