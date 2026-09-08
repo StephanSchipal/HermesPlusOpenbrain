@@ -270,6 +270,9 @@ button { cursor: pointer; }
 .external-costs-table th, .external-costs-table td { padding: 0.55rem 0.4rem; text-align: left; }
 .external-costs-table input[type="text"], .external-costs-table input:not([type]) { width: 100%; }
 .external-costs-table input.num { width: 6rem; text-align: right; }
+.external-costs-table .url-cell { display: flex; align-items: center; gap: 0.3rem; }
+.external-costs-table .url-cell input { flex: 1 1 auto; min-width: 0; width: auto; }
+.external-costs-table .url-cell a { flex: 0 0 auto; }
 .external-costs-table tr.selected { background: rgba(127, 127, 127, 0.15); }
 .external-costs-actions { display: flex; gap: 0.5rem; margin-top: 0.9rem; }
 

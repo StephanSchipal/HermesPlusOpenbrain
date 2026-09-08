@@ -37,6 +37,10 @@ export default function CostView() {
   const [showPicker, setShowPicker] = useState(false)
   const [saving, setSaving] = useState(false)
   const [saveStatus, setSaveStatus] = useState(null)
+  // Fed by ExternalCostGrid (which owns loading/saving them) purely so the
+  // By-model table below can cross-reference an unpriced model against a
+  // matching external-cost row -- see CostTables.
+  const [externalCosts, setExternalCosts] = useState([])
 
   // The profile list drives the per-bot selector. `All` is always first; the
   // backend list is appended. A bare `[]` (no Hermes data mounted) just leaves
@@ -196,6 +200,7 @@ export default function CostView() {
               bySession={display.by_session}
               profile={tablesProfile}
               onSelectSession={setSelectedSession}
+              externalCosts={externalCosts}
             />
             {selectedSession && (
               <SessionDetail sessionId={selectedSession.id} profile={selectedSession.profile}
@@ -211,7 +216,7 @@ export default function CostView() {
         <CostReportPicker onSelect={handleLoadReport} onClose={() => setShowPicker(false)} />
       )}
 
-      <ExternalCostGrid />
+      <ExternalCostGrid onRowsChange={setExternalCosts} />
     </div>
   )
 }

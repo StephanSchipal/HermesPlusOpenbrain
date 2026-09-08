@@ -16,7 +16,32 @@ function money(value) {
   return value == null ? '' : Number(value).toFixed(2)
 }
 
-export default function ExternalCostGrid({ onTotalsChange }) {
+// Free-typing money box: the displayed text is local state, so mid-edit
+// keystrokes (e.g. typing cents) are never reformatted out from under the
+// cursor. The formatted `value` prop only overwrites that local text once
+// the box isn't focused -- so currency conversion (which reformats and can
+// change the OTHER box) is deferred to blur via onCommit, never onChange.
+function MoneyInput({ value, onCommit }) {
+  const [text, setText] = useState(money(value))
+  const [focused, setFocused] = useState(false)
+
+  useEffect(() => {
+    if (!focused) setText(money(value))
+  }, [value, focused])
+
+  return (
+    <input
+      className="num"
+      value={text}
+      onChange={(e) => setText(e.target.value)}
+      onFocus={() => setFocused(true)}
+      onBlur={() => { setFocused(false); onCommit(text) }}
+      onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur() }}
+    />
+  )
+}
+
+export default function ExternalCostGrid({ onTotalsChange, onRowsChange }) {
   const [rows, setRows] = useState([])
   const [rate, setRate] = useState(null)
   const [rateInput, setRateInput] = useState('')
@@ -32,6 +57,10 @@ export default function ExternalCostGrid({ onTotalsChange }) {
     setRateInput(data.rate ? String(data.rate.usd_to_eur) : '')
     setDirty(false)
     onTotalsChange?.(data.totals)
+    // Saved rows (not the in-progress, unsaved edits in `rows` state) are what
+    // the By-model cross-reference note should read -- only rows that made it
+    // to the database are a fact worth surfacing next to an unpriced model.
+    onRowsChange?.(data.rows)
   }
 
   useEffect(() => { load().catch((e) => setError(e.message)) }, [])
@@ -152,18 +181,18 @@ export default function ExternalCostGrid({ onTotalsChange }) {
                 </select>
               </td>
               <td>
-                <input className="num" value={money(row.usd)}
-                       onChange={(e) => setAmount(idx, 'USD', e.target.value)} />
+                <MoneyInput value={row.usd} onCommit={(text) => setAmount(idx, 'USD', text)} />
               </td>
               <td>
-                <input className="num" value={money(row.eur)}
-                       onChange={(e) => setAmount(idx, 'EUR', e.target.value)} />
+                <MoneyInput value={row.eur} onCommit={(text) => setAmount(idx, 'EUR', text)} />
               </td>
               <td>
-                <input value={row.url || ''} onChange={(e) => patch(idx, { url: e.target.value })} />
-                {row.url && (
-                  <a href={row.url} target="_blank" rel="noopener noreferrer" title="Open billing page">↗</a>
-                )}
+                <span className="url-cell">
+                  <input value={row.url || ''} onChange={(e) => patch(idx, { url: e.target.value })} />
+                  {row.url && (
+                    <a href={row.url} target="_blank" rel="noopener noreferrer" title="Open billing page">↗</a>
+                  )}
+                </span>
               </td>
               <td>
                 <input value={row.comments || ''}

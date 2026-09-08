@@ -3,7 +3,20 @@ import { usd, tokens } from './format'
 const SUM_KEYS = ['sessions', 'api_calls', 'input_tokens', 'output_tokens',
                    'cache_read_tokens', 'cache_write_tokens', 'cost_usd']
 
-function Table({ title, rows, labelKey, labelHeader, onRowClick, botColumn }) {
+// An unpriced model (Hermes has no rate for it, so its own cost_usd reads 0 --
+// see costpage.md §2.6) may still have a real dollar figure the user tracked
+// by hand as an External-costs row named after the model. This is a
+// cross-reference note only -- it never changes cost_usd or any total, so it
+// can't create a double-count against the External-costs total or the header
+// Total-cost-of-ownership tile, which already counts that row once.
+function matchExternalCost(modelName, externalCosts) {
+  if (!modelName || !externalCosts?.length) return null
+  const needle = modelName.trim().toLowerCase()
+  return externalCosts.find((r) => (r.name || '').trim().toLowerCase() === needle
+    && r.usd != null) || null
+}
+
+function Table({ title, rows, labelKey, labelHeader, onRowClick, botColumn, externalCosts }) {
   const total = rows.reduce((sum, r) => sum + (r.cost_usd || 0), 0)
   // Gate the Bot column on the data actually carrying `profile`, not just the
   // caller's flag: a single-bot payload (or a pre-feature saved report) has no
@@ -38,6 +51,8 @@ function Table({ title, rows, labelKey, labelHeader, onRowClick, botColumn }) {
         <tbody>
           {displayRows.map((r, i) => {
             const clickable = Boolean(onRowClick && r[labelKey])
+            const externalMatch = !r.cost_usd && labelKey === 'model'
+              ? matchExternalCost(r[labelKey], externalCosts) : null
             return (
             <tr key={r.session_id ?? r[labelKey] ?? i}
                 className={clickable ? 'clickable' : ''}
@@ -50,7 +65,15 @@ function Table({ title, rows, labelKey, labelHeader, onRowClick, botColumn }) {
               <td>{tokens(r.output_tokens)}</td>
               <td>{tokens(r.cache_read_tokens)}</td>
               <td>{tokens(r.cache_write_tokens)}</td>
-              <td>{usd(r.cost_usd)}</td>
+              <td>
+                {usd(r.cost_usd)}
+                {externalMatch && (
+                  <em className="cost-note"
+                      title={`Not priced by Hermes (counted as $0 above) -- tracked by hand in External costs as "${externalMatch.name}"`}>
+                    {' '}(see External costs: {usd(externalMatch.usd)})
+                  </em>
+                )}
+              </td>
               <td>{total ? `${((r.cost_usd / total) * 100).toFixed(0)}%` : '—'}</td>
             </tr>
             )
@@ -61,10 +84,11 @@ function Table({ title, rows, labelKey, labelHeader, onRowClick, botColumn }) {
   )
 }
 
-export default function CostTables({ byModel, byPlatform, bySession, profile, onSelectSession }) {
+export default function CostTables({ byModel, byPlatform, bySession, profile, onSelectSession, externalCosts }) {
   return (
     <div className="cost-tables">
-      <Table title="By model" rows={byModel || []} labelKey="model" labelHeader="Model" />
+      <Table title="By model" rows={byModel || []} labelKey="model" labelHeader="Model"
+             externalCosts={externalCosts} />
       <Table title="By platform" rows={byPlatform || []} labelKey="platform" labelHeader="Platform" />
       <Table title="Top spenders" rows={bySession || []} labelKey="title" labelHeader="Session"
              botColumn={profile === 'all'}
