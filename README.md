@@ -562,6 +562,16 @@ Buzz publishes no semver image tags). Closed relay; the owner community and its 
 
 Container map, redeploy / upgrade runbook, member admin, and backup/restore: [`buzz.md`](buzz.md).
 
+### Hermes agents in Buzz
+
+Each Hermes profile can join Buzz channels as its own member identity, via
+`buzz-acp` bridging `hermes -p <profile> acp`. Runs inside the Hermes container,
+cron-supervised under `/opt/data`. v1: owner-only addressing is the trust
+boundary; agents otherwise have their full Hermes capability. Code changes go
+through Buzz-native feature-branch review.
+
+> Status: **build-out in progress** — see [`buzz-agents.md`](buzz-agents.md)
+
 ## License
 
 The code in this repository is released under the [MIT License](LICENSE) — free to use, modify,
