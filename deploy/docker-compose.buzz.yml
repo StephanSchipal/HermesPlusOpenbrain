@@ -11,7 +11,8 @@
 #   3. relay ports "${BUZZ_HTTP_PORT:-3000}:3000"
 #        ->  "127.0.0.1:${BUZZ_HTTP_PORT:-3000}:3000"   (loopback only; public path is Traefik)
 #   4. relay: dropped `env_file: - .env`; every var listed under `environment:` so this
-#      container never inherits the openbrain/stripe secrets in the shared deploy/.env
+#      container never inherits the openbrain/stripe secrets in the shared deploy/.env.
+#      Also flips BUZZ_AUTO_MIGRATE default false -> true (closed-relay default, design 4.4)
 #   5. relay: added traefik.* labels; upstream compose.caddy.yml is NOT vendored
 #   6. Postgres/Redis .env keys prefixed BUZZ_ (POSTGRES_PASSWORD etc. are already
 #      taken by the openbrain stack in the shared deploy/.env). In-container var
