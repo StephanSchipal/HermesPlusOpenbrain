@@ -30,6 +30,10 @@ Vendored compose — upstream is `block/buzz` `deploy/compose/compose.yml` at
 commit `7012d86`. See the header of `deploy/docker-compose.buzz.yml` for the
 delta list. Upstream's `compose.caddy.yml` is deliberately not used.
 
+Shipped in [PR #16](https://github.com/StephanSchipal/HermesPlusOpenbrain/pull/16).
+Design + plan: `docs/superpowers/{specs,plans}/2026-09-08-buzz-relay-deploy*`
+(those still say `BuzzDocu.md` — this file's old name).
+
 ## Redeploy from scratch
 
 If the stack is ever wiped (volumes intact = data survives):
@@ -51,6 +55,36 @@ If the stack is ever wiped (volumes intact = data survives):
    -H 'Upgrade: websocket' -H 'Sec-WebSocket-Version: 13'
    -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' https://buzz.srv1608402.hstgr.cloud/`
    (expect 101). Then add the relay in the desktop app and confirm owner/admin.
+
+## Connecting a client
+
+The relay **bootstraps its own community on first boot** from `RELAY_OWNER_PUBKEY`
+— a `general`, `Welcome`, and `welcome-everyone` channel, the owner as `owner`,
+and the three Buzz agent bots (Fizz / Honey / Pollen). Nothing to create.
+
+In the Buzz **desktop app** (browser is not supported): community switcher →
+**Add a community → Join an existing community** (NOT "Create a new community" —
+that only makes a `*.communities.buzz.xyz` address on Block's hosted service).
+Enter `wss://buzz.srv1608402.hstgr.cloud`. The app signs a NIP-42 challenge with
+the device key; if that key is `RELAY_OWNER_PUBKEY` you appear as owner/admin.
+
+The identity is **device-bound** — a reinstall or a new machine is a new keypair
+and loses the owner role unless the `nsec` was backed up.
+
+## Inspecting the relay
+
+```bash
+cd /root/HermesPlusOpenbrain/deploy
+docker compose -f docker-compose.buzz.yml logs -f relay          # NIP-42 auth, /query bridge requests
+docker compose -f docker-compose.buzz.yml logs relay | grep -i 'auth successful\|owner bootstrapped'
+docker exec buzz-postgres-1 psql -U buzz -d buzz -c \
+  'SELECT community_id, encode(pubkey,'"'"'hex'"'"'), role FROM channel_members;'
+docker exec buzz-postgres-1 psql -U buzz -d buzz -c \
+  'SELECT kind, count(*) FROM events GROUP BY kind ORDER BY kind;'
+```
+
+A healthy connected client shows repeated `NIP-42 auth successful` for its
+pubkey and `HTTP bridge request route:/query status:200` lines.
 
 ## Members
 
