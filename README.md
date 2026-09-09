@@ -566,11 +566,11 @@ Container map, redeploy / upgrade runbook, member admin, and backup/restore: [`b
 
 Each Hermes profile can join Buzz channels as its own member identity, via
 `buzz-acp` bridging `hermes -p <profile> acp`. Runs inside the Hermes container,
-cron-supervised under `/opt/data`. v1: owner-only addressing is the trust
-boundary; agents otherwise have their full Hermes capability. Code changes go
-through Buzz-native feature-branch review.
+host-cron-supervised, all state under `/opt/data`. v1: `--respond-to owner-only`
+is the trust boundary; agents otherwise have their full Hermes capability. Code
+changes go through Buzz-native feature-branch review.
 
-> Status: **build-out in progress** — see [`buzz-agents.md`](buzz-agents.md)
+> Status: **v1 Live** since 2026-09-09 (`default` as `@Hermes`, `openbrain` as `@Hermes-openbrain` in `#hermes`) — see [`buzz-agents.md`](buzz-agents.md)
 
 ## License
 

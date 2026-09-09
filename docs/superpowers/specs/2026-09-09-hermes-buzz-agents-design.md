@@ -250,8 +250,10 @@ or not. The implementer confirms the exact marker with a one-line probe
   0600 file directly / via stdin; never let it reach a shell transcript.
 - `buzz-admin add-member --pubkey <hex> --role member` per agent — one at a
   time, `sleep 1` between (roster is a single kind:13534 event).
-- Display name per agent: `Hermes · <profile>` (set via the Buzz CLI on first
-  run, or a profile field), so they read distinctly from Fizz/Honey/Pollen.
+- Display name: the `default` agent is **`Hermes`**; every other profile is
+  **`Hermes-<profile>`** (e.g. `Hermes-openbrain`). Set via
+  `buzz users set-profile --name …` on first run. Reads distinctly from
+  Fizz/Honey/Pollen, and `@Hermes` / `@Hermes-openbrain` resolve unambiguously.
 
 ### 3.5 Capability model (v1)
 

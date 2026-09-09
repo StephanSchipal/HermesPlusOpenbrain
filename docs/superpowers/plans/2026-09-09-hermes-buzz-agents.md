@@ -417,7 +417,7 @@ signed approval regardless of agent capability.
 4. `printf '%s\n' '<hex-secret>' > /opt/data/buzz-agents/<profile>.key && chmod 600 …`
 5. Add `<profile>` to `/opt/data/buzz-agents/enabled`.
 6. `docker exec hermes-agent-7qpk-hermes-agent-1 /opt/data/buzz-agents/supervise.sh --once` (cron does it within a minute anyway).
-7. In the desktop app: give the agent a display name (`Hermes · <profile>`) and add it to the channels it should see.
+7. Set the display name (`buzz users set-profile --name "Hermes-<profile>"`; the `default` agent is just `Hermes`) and, in the desktop app, add it to the channels it should see.
 
 ## Remove / pause an agent
 

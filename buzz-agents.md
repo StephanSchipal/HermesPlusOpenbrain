@@ -1,7 +1,6 @@
 # Hermes agents in Buzz
 
-**Status: build-out in progress — spike passed 2026-09-09.**
-(Flip to `**v1 LIVE 2026-09-__**` once the fleet is verified.)
+**Status: v1 LIVE since 2026-09-09.**
 
 Bridges Hermes profiles into the live Buzz relay ([`buzz.md`](buzz.md)) as
 member identities, via `buzz-acp` → `hermes -p <profile> acp`.
@@ -9,6 +8,33 @@ member identities, via `buzz-acp` → `hermes -p <profile> acp`.
 - Design: [`docs/superpowers/specs/2026-09-09-hermes-buzz-agents-design.md`](docs/superpowers/specs/2026-09-09-hermes-buzz-agents-design.md)
 - Spike findings: [`docs/superpowers/notes/2026-09-09-hermes-buzz-agents-spike.md`](docs/superpowers/notes/2026-09-09-hermes-buzz-agents-spike.md)
 - Plan: [`docs/superpowers/plans/2026-09-09-hermes-buzz-agents.md`](docs/superpowers/plans/2026-09-09-hermes-buzz-agents.md)
+
+## As deployed (2026-09-09)
+
+| Profile | Buzz display name | pubkey (hex) | model |
+| --- | --- | --- | --- |
+| `default` | **`Hermes`** | `3164087055f1f9a4a38ab834073e9155e3c3b41ed8ae31e2ee0f7deadf7e7a2b` | claude-sonnet-5 |
+| `openbrain` | **`Hermes-openbrain`** | `dacaf9735c2b0379b99f5f98602c3454acde93006feaa7da0e92bd6dfaa61481` | moonshotai/kimi-k3 |
+
+Naming: the `default` agent is just **`Hermes`**; every other profile is
+`Hermes-<profile>`. (`default` was renamed off `Hermes-default` to avoid a
+collision with a leftover spike identity still listed as a `#hermes` member —
+harmless, the Buzz desktop's member-remove menu is currently unclickable for
+that row.)
+
+- Channel: `#hermes` = `aea9fa66-34f9-46fd-a6dd-4dbc2a95c776`.
+- `buzz-acp` sha256 `5b98ce62889ebab194e83427cd319ec8ad39a30d51ab4f01d4e33d8e0f763a93`,
+  `buzz.real` sha256 `c3686bee82bccf9117126909583af3788fc0f855c7a5f661686870e66e4a1362`
+  — both `block/buzz@3c7f288`, musl-static.
+- Host crontab: `* * * * * /root/HermesPlusOpenbrain/scripts/buzz-agents-watchdog.sh`.
+- Verified: owner @mentions `@Hermes` and `@Hermes-openbrain` in `#hermes`, each
+  replies from its own identity with its own toolset — `default` did a real
+  `laptop_fs` check, `openbrain` a real `openbrain stats` (133 captures).
+
+**Known limitation:** a mention that arrives during the ~40 s window when the
+Hermes container is restarting (e.g. the `laptop_fs` watchdog's `docker restart`
+after the laptop reconnects) is missed — buzz-acp does not replay it on
+recovery. Re-mention and it answers. Acceptable for v1.
 
 ## What runs
 
@@ -86,7 +112,7 @@ any repo an agent can touch.
 3. `docker exec "$HC" sh -c "sed 's|-p,PROFILE,acp|-p,$P,acp|' /opt/data/buzz-agents-staging/buzz-agent-env.example > /opt/data/buzz-agents/$P.env && chmod 600 /opt/data/buzz-agents/$P.env"` — the `.env` carries no secret.
 4. Add `<profile>` on its own line to `/opt/data/buzz-agents/enabled`.
 6. `docker exec hermes-agent-7qpk-hermes-agent-1 /opt/data/buzz-agents/supervise.sh --once` (cron does it within a minute anyway).
-7. In the desktop app: give the agent a display name (`Hermes · <profile>`) and add it to the channels it should see. `buzz-acp` auto-subscribes on the membership event.
+7. Set the display name via the CLI — `docker exec -e HERMES_PROFILE=<profile> "$HC" buzz users set-profile --name "Hermes-<profile>"` (the `default` agent is just `Hermes`). Then in the desktop app add it to the channels it should see; `buzz-acp` auto-subscribes on the membership event.
 
 ## Remove / pause an agent
 
