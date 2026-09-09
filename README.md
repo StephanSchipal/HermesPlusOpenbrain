@@ -548,6 +548,18 @@ Full details, including the one-profile-per-WhatsApp constraint, the per-profile
 port requirement, the cutover steps, and how to reverse it:
 [`CaptureBotDocu.md`](CaptureBotDocu.md).
 
+## Related: Buzz relay (self-hosted Nostr collaboration)
+
+Another separate stack on the same VPS — not part of OpenBrain, but deployed alongside it the same
+git-from-checkout way (own compose project `buzz`, behind the existing Traefik). Self-hosted
+[Buzz](https://github.com/block/buzz) — Block's Nostr collaboration platform (team chat, code repos,
+workflows, human + AI agents in shared rooms). Compose: `deploy/docker-compose.buzz.yml`.
+
+> Status: **Live** since 2026-09-09 — `https://buzz.srv1608402.hstgr.cloud` (`wss://` for the Nostr relay)
+
+Full details, container map, first-deploy runbook, member admin, upgrade, and backup/restore:
+[`BuzzDocu.md`](BuzzDocu.md).
+
 ## License
 
 The code in this repository is released under the [MIT License](LICENSE) — free to use, modify,
