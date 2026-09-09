@@ -57,8 +57,10 @@ recovery. Re-mention and it answers. Acceptable for v1.
 - `scripts/buzz-agents-watchdog.sh` — **host** script, run every minute from the
   host crontab (`* * * * * /root/HermesPlusOpenbrain/scripts/buzz-agents-watchdog.sh`).
   The container is s6-managed with no crontab of its own, so liveness lives on
-  the host — same pattern as `/root/hermes-laptop-fs-watchdog.sh`. It reinstalls
-  the wrapper (as root) then runs `supervise.sh --once` (as `hermes`).
+  the host — same pattern as `/root/hermes-laptop-fs-watchdog.sh`. Each run:
+  syncs `supervise.sh` + `buzz-wrap.sh` from the repo into `/opt/data/buzz-agents/`
+  (so a `git pull` takes effect on its own), reinstalls the wrapper to
+  `/usr/local/bin/buzz` (as root), then runs `supervise.sh --once` (as `hermes`).
 - Logs: `/opt/data/buzz-agents/<profile>.log`, `supervise.log`;
   `/var/log/buzz-agents-watchdog.log` on the host.
 
@@ -109,10 +111,15 @@ any repo an agent can touch.
    ```
    (`RC=buzz-relay-1`, `HC=hermes-agent-7qpk-hermes-agent-1`.) Also copy the secret into the password manager — `docker exec "$HC" cat /opt/data/buzz-agents/$P.key`.
 2. `docker exec "$RC" /usr/local/bin/buzz-admin add-member --pubkey "$PUB" --role member`
-3. `docker exec "$HC" sh -c "sed 's|-p,PROFILE,acp|-p,$P,acp|' /opt/data/buzz-agents-staging/buzz-agent-env.example > /opt/data/buzz-agents/$P.env && chmod 600 /opt/data/buzz-agents/$P.env"` — the `.env` carries no secret.
+3. Write the `.env` (no secret) from the repo template, on the host:
+   ```sh
+   sed "s|-p,PROFILE,acp|-p,$P,acp|" /root/HermesPlusOpenbrain/scripts/buzz-agent-env.example \
+     | docker exec -i "$HC" sh -c "cat > /opt/data/buzz-agents/$P.env && chmod 600 /opt/data/buzz-agents/$P.env"
+   ```
 4. Add `<profile>` on its own line to `/opt/data/buzz-agents/enabled`.
-6. `docker exec hermes-agent-7qpk-hermes-agent-1 /opt/data/buzz-agents/supervise.sh --once` (cron does it within a minute anyway).
-7. Set the display name via the CLI — `docker exec -e HERMES_PROFILE=<profile> "$HC" buzz users set-profile --name "Hermes-<profile>"` (the `default` agent is just `Hermes`). Then in the desktop app add it to the channels it should see; `buzz-acp` auto-subscribes on the membership event.
+5. Set the display name — `docker exec -e HERMES_PROFILE=$P "$HC" buzz users set-profile --name "Hermes-$P"` (the `default` agent is just `Hermes`).
+6. `/root/HermesPlusOpenbrain/scripts/buzz-agents-watchdog.sh` — starts the new bridge now (cron runs it every minute anyway; it also re-syncs `supervise.sh` / `buzz-wrap.sh` from the repo).
+7. In the desktop app, add the agent to the channels it should see; `buzz-acp` auto-subscribes on the membership event.
 
 ## Remove / pause an agent
 
