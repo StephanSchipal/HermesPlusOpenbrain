@@ -19,6 +19,12 @@
 #      names are left as upstream expects.
 #   7. BUZZ_IMAGE default pinned to an exact commit tag, not :main. Buzz publishes
 #      only :main / :latest / sha-<7> image tags (no semver), so we pin sha-<7>.
+#   8. NOT from upstream compose: a `pair-relay` sidecar (same image,
+#      entrypoint buzz-pair-relay) so NIP-AB device pairing (desktop QR -> phone)
+#      does not depend on Block's hosted pairing.buzz.xyz. Relay gets
+#      BUZZ_PAIRING_RELAY_URL=wss://${BUZZ_PAIR_DOMAIN} so its NIP-11 advertises it.
+#      The pair-relay is stateless/ephemeral (no DB, no volume) and only shuttles
+#      NIP-44 ciphertext between the two devices.
 #
 # Deploy:  cd deploy && docker compose -f docker-compose.buzz.yml up -d --wait
 # Ops ref: ../buzz.md
@@ -53,6 +59,7 @@ services:
       BUZZ_MEDIA_BASE_URL: https://${BUZZ_DOMAIN:?set BUZZ_DOMAIN}/media
       BUZZ_MEDIA_SERVER_DOMAIN: ${BUZZ_DOMAIN:?set BUZZ_DOMAIN}
       BUZZ_CORS_ORIGINS: https://${BUZZ_DOMAIN:?set BUZZ_DOMAIN}
+      BUZZ_PAIRING_RELAY_URL: wss://${BUZZ_PAIR_DOMAIN:?set BUZZ_PAIR_DOMAIN}
       RUST_LOG: ${BUZZ_RUST_LOG:-buzz_relay=info,buzz_db=info,buzz_auth=info,buzz_pubsub=info,tower_http=info}
     ports:
       - "127.0.0.1:${BUZZ_HTTP_PORT:-3000}:3000"
@@ -86,6 +93,28 @@ services:
       - "traefik.http.routers.buzz.entrypoints=websecure"
       - "traefik.http.routers.buzz.tls.certresolver=letsencrypt"
       - "traefik.http.services.buzz.loadbalancer.server.port=3000"
+      - "traefik.docker.network=buzz_buzz_net"
+
+  pair-relay:
+    image: ${BUZZ_IMAGE:-ghcr.io/block/buzz:sha-3c7f288}
+    entrypoint: ["buzz-pair-relay"]
+    environment:
+      BUZZ_PAIR_RELAY_BIND_ADDR: 0.0.0.0:5000
+    healthcheck:
+      test: ["CMD-SHELL", "bash -ec 'exec 3<>/dev/tcp/127.0.0.1/5000'"]
+      interval: 15s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+    restart: unless-stopped
+    networks:
+      - buzz_net
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.buzzpair.rule=Host(`${BUZZ_PAIR_DOMAIN}`)"
+      - "traefik.http.routers.buzzpair.entrypoints=websecure"
+      - "traefik.http.routers.buzzpair.tls.certresolver=letsencrypt"
+      - "traefik.http.services.buzzpair.loadbalancer.server.port=5000"
       - "traefik.docker.network=buzz_buzz_net"
 
   postgres:

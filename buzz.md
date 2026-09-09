@@ -18,9 +18,9 @@ platform (team chat, code repos, workflows, human + AI agents in shared rooms).
 | Piece | Detail |
 | --- | --- |
 | Compose file | `deploy/docker-compose.buzz.yml`, project **`buzz`** |
-| Containers | `buzz-relay-1`, `buzz-postgres-1`, `buzz-redis-1`, `buzz-minio-1` (+ `buzz-minio-init-1` one-shot) |
-| Public URL | `https://buzz.srv1608402.hstgr.cloud` — web UI + NIP-11; `wss://…` for the relay |
-| Ingress | existing host-mode Traefik, router `buzz`, LE http-challenge cert. No Caddy. |
+| Containers | `buzz-relay-1`, `buzz-pair-relay-1`, `buzz-postgres-1`, `buzz-redis-1`, `buzz-minio-1` (+ `buzz-minio-init-1` one-shot) |
+| Public URL | `https://buzz.srv1608402.hstgr.cloud` — web UI + NIP-11; `wss://…` for the relay. `wss://buzzpair.srv1608402.hstgr.cloud` — NIP-AB device pairing (phone ↔ desktop). |
+| Ingress | existing host-mode Traefik, routers `buzz` + `buzzpair`, LE http-challenge certs. No Caddy. |
 | Local port | `127.0.0.1:3000` on the VPS (debug only) |
 | Network | `buzz_buzz_net` bridge, internal; nothing joins the Hermes network |
 | Volumes | `buzz_buzz-postgres-data`, `buzz_buzz-redis-data`, `buzz_buzz-minio-data`, `buzz_buzz-git-data` |
@@ -70,6 +70,26 @@ the device key; if that key is `RELAY_OWNER_PUBKEY` you appear as owner/admin.
 
 The identity is **device-bound** — a reinstall or a new machine is a new keypair
 and loses the owner role unless the `nsec` was backed up.
+
+### Adding a phone (NIP-AB pairing)
+
+The Buzz **mobile** app onboards **only** by pairing — QR or `buzz://…` code —
+there is no "paste an nsec" path. Pairing needs a pairing relay; ours is the
+`pair-relay` sidecar, advertised in the relay's NIP-11 as
+`pairing_relay_url: wss://buzzpair.srv1608402.hstgr.cloud` (set via
+`BUZZ_PAIR_DOMAIN`). Without it the desktop tries a non-existent `<relay>/pair`
+path (404) and the QR silently does nothing.
+
+Flow: desktop → Settings → pair a device → shows a QR / `buzz://` code; phone
+scans it; both show a short SAS code; confirm they match. The nsec transfer is
+NIP-44 encrypted end-to-end — the pair-relay only relays ciphertext and keeps
+nothing (stateless, no volume). **Never** send that `buzz://` code through any
+channel other than device-to-device — it carries the session secret that
+authorizes the key transfer.
+
+Verify the pairing relay: `curl -H 'Accept: application/nostr+json'
+https://buzz.srv1608402.hstgr.cloud/ | grep -o pairing_relay_url` and a WS
+handshake to `wss://buzzpair.srv1608402.hstgr.cloud/` should return `101`.
 
 ## Inspecting the relay
 
