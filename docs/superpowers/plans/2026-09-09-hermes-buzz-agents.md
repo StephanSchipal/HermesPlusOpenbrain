@@ -635,32 +635,49 @@ docker exec "$HC" sh -c '
 
 ---
 
-## Task 8: Install cron; start the fleet
+## Task 8: Add agents to `#hermes`, install host cron, start the fleet
 
-**Files:** none committed.
+**Files:** `scripts/buzz-agents-watchdog.sh` (already committed).
 
-- [ ] **Step 1: First run, observe**
-
-```bash
-docker exec hermes-agent-7qpk-hermes-agent-1 /opt/data/buzz-agents/supervise.sh --once
-sleep 5
-docker exec hermes-agent-7qpk-hermes-agent-1 pgrep -af buzz-acp
-docker exec hermes-agent-7qpk-hermes-agent-1 sh -c 'head -3 /usr/local/bin/buzz; for p in $(grep -v "^#" /opt/data/buzz-agents/enabled); do echo "--- $p ---"; tail -5 /opt/data/buzz-agents/$p.log; done'
-```
-Expected: one `buzz-acp` per enabled name; each log shows `connected to relay` + `subscribed to channel`; `/usr/local/bin/buzz` is the wrapper.
-
-- [ ] **Step 2: Install the cron liveness entry**
-
-Match the mechanism the voice watchdog uses (`docker exec hermes-agent-7qpk-hermes-agent-1 crontab -l`). Add:
-```
-* * * * * /opt/data/buzz-agents/supervise.sh --once >>/opt/data/buzz-agents/cron.log 2>&1
-```
-If the container has no root crontab, copy the voice setup's persistence mechanism (repo Twilio/voice notes) and record what was done in `buzz-agents.md`.
-
-- [ ] **Step 3: Confirm cron survives**
+- [ ] **Step 1: Publish kind:0 profiles so the agents are addable in the desktop app**
 
 ```bash
-docker exec hermes-agent-7qpk-hermes-agent-1 crontab -l | grep buzz-agents
+for p in $(grep -v '^#' /opt/data/buzz-agents/enabled 2>/dev/null || echo default openbrain); do
+  docker exec -e HERMES_PROFILE=$p "$HC" buzz users set-profile --name "Hermes-$p" --about "Hermes $p profile in Buzz"
+done
+```
+(`buzz` here is the wrapper; `HERMES_PROFILE` tells it which `<p>.key` to use.)
+
+- [ ] **Step 2: Owner adds each agent to `#hermes`**
+
+In the Buzz **desktop app**, as owner: `#hermes` → add people → `Hermes-default`, `Hermes-openbrain`. (`#hermes` = `aea9fa66-34f9-46fd-a6dd-4dbc2a95c776`, kept from the spike.) buzz-acp auto-subscribes on the membership event.
+
+- [ ] **Step 3: First run, observe**
+
+```bash
+docker exec "$HC" install -m0755 /opt/data/buzz-agents/buzz-wrap.sh /usr/local/bin/buzz
+docker exec -u hermes -e HOME=/opt/data "$HC" /opt/data/buzz-agents/supervise.sh --once
+sleep 6
+docker exec "$HC" pgrep -af buzz-acp
+docker exec "$HC" sh -c 'for p in $(grep -v "^#" /opt/data/buzz-agents/enabled); do echo "--- $p ---"; tail -4 /opt/data/buzz-agents/$p.log; done'
+```
+Expected: one `buzz-acp` per enabled name; each log shows `connected to relay` and, once Step 2 is done, `subscribed to channel aea9fa66…` (not `discovered 0 channel(s)`).
+
+- [ ] **Step 4: Install the host cron entry** (the container is s6-managed — no in-container crontab; this mirrors `/root/hermes-laptop-fs-watchdog.sh`)
+
+```bash
+( crontab -l 2>/dev/null; echo '* * * * * /root/HermesPlusOpenbrain/scripts/buzz-agents-watchdog.sh' ) | sort -u | crontab -
+crontab -l | grep buzz-agents-watchdog
+touch /var/log/buzz-agents-watchdog.log
+```
+
+- [ ] **Step 5: Confirm the watchdog runs and is idempotent**
+
+```bash
+/root/HermesPlusOpenbrain/scripts/buzz-agents-watchdog.sh
+sleep 2
+docker exec "$HC" pgrep -c buzz-acp        # still one per enabled, not doubled
+tail -5 /var/log/buzz-agents-watchdog.log
 ```
 
 ---

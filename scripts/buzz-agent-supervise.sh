@@ -26,13 +26,14 @@ if command -v flock >/dev/null 2>&1; then flock -n 9 || exit 0; fi
 log() { echo "$(date -Is) $*" >>"$LOGDIR/supervise.log"; }
 
 install_wrapper() {
+  # Best-effort. The host watchdog (buzz-agents-watchdog.sh) installs the
+  # wrapper as root; this is only a fallback for a standalone/root run. Silent
+  # when the destination dir isn't writable (the normal case, run as hermes).
   [ -r "$BUZZ_WRAP_SRC" ] || return 0
+  [ -w "$(dirname "$BUZZ_WRAP_DEST")" ] || return 0
   if ! cmp -s "$BUZZ_WRAP_SRC" "$BUZZ_WRAP_DEST" 2>/dev/null; then
-    if install -m 0755 "$BUZZ_WRAP_SRC" "$BUZZ_WRAP_DEST" 2>/dev/null; then
-      log "installed wrapper -> $BUZZ_WRAP_DEST"
-    else
-      log "WARN could not install wrapper -> $BUZZ_WRAP_DEST"
-    fi
+    install -m 0755 "$BUZZ_WRAP_SRC" "$BUZZ_WRAP_DEST" 2>/dev/null \
+      && log "installed wrapper -> $BUZZ_WRAP_DEST"
   fi
 }
 

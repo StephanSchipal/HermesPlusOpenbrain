@@ -220,10 +220,16 @@ spike showed Hermes's terminal sandbox strips the entire `BUZZ_` prefix, secret
 or not. The implementer confirms the exact marker with a one-line probe
 (`hermes -p <p> -z "run: env | grep -E 'HERMES_PROFILE|HERMES_HOME'"`).
 
-- **cron** entry (every minute) runs `supervise.sh --once` — the same
-  liveness mechanism the voice gateway uses. `supervise.sh` is idempotent and
-  self-locking (one supervisor, one `buzz-acp` per enabled agent).
+- **Liveness is a HOST cron job** (the container is s6-managed and has no
+  crontab — same constraint the `laptop_fs` watchdog works around):
+  `* * * * * /root/HermesPlusOpenbrain/scripts/buzz-agents-watchdog.sh`. The
+  watchdog does two `docker exec`s: `install` the wrapper to `/usr/local/bin`
+  (as root), then `supervise.sh --once` (as `hermes`). `supervise.sh` is
+  idempotent and self-locking (one supervisor, one `buzz-acp` per enabled
+  agent). buzz-acp + its `hermes acp` children run as `hermes`, so
+  `/opt/data/buzz-agents/` is `hermes`-owned.
 - Repo artefacts (this is inside a vendor container, so **no compose file**):
+  - `scripts/buzz-agents-watchdog.sh` — the host cron entry point
   - `scripts/buzz-agent-supervise.sh` — the supervisor, copied to `/opt/data/buzz-agents/`
   - `scripts/buzz-wrap.sh` — the `buzz` CLI wrapper
   - `scripts/buzz-agent-env.example` — the per-agent env template

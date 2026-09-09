@@ -26,15 +26,20 @@ member identities, via `buzz-acp` → `hermes -p <profile> acp`.
   `scripts/buzz-agent-supervise.sh`. One `buzz-acp` per enabled name; also
   reinstalls the wrapper.
 - `/opt/data/buzz-agents/buzz-wrap.sh` → `/usr/local/bin/buzz` — the reply
-  wrapper. `/usr/local/bin` is **not** a Docker volume; the supervisor
-  reinstalls it every sweep.
-- cron (container crontab):
-  `* * * * * /opt/data/buzz-agents/supervise.sh --once >>/opt/data/buzz-agents/cron.log 2>&1`
-- Logs: `/opt/data/buzz-agents/<profile>.log`, `supervise.log`, `cron.log`.
+  wrapper. `/usr/local/bin` is **not** a Docker volume; the host watchdog
+  reinstalls it every minute.
+- `scripts/buzz-agents-watchdog.sh` — **host** script, run every minute from the
+  host crontab (`* * * * * /root/HermesPlusOpenbrain/scripts/buzz-agents-watchdog.sh`).
+  The container is s6-managed with no crontab of its own, so liveness lives on
+  the host — same pattern as `/root/hermes-laptop-fs-watchdog.sh`. It reinstalls
+  the wrapper (as root) then runs `supervise.sh --once` (as `hermes`).
+- Logs: `/opt/data/buzz-agents/<profile>.log`, `supervise.log`;
+  `/var/log/buzz-agents-watchdog.log` on the host.
 
-Everything under `/opt/data` survives a Hermes image update. The wrapper at
-`/usr/local/bin/buzz` does not — the supervisor puts it back within a minute,
-before any turn can complete.
+`buzz-acp` and its `hermes acp` children run as `hermes`; `/opt/data/buzz-agents/`
+is `hermes`-owned. Everything under `/opt/data` survives a Hermes image update;
+the wrapper at `/usr/local/bin/buzz` does not — the watchdog puts it back within
+a minute, before any turn can complete.
 
 ## Why the wrapper
 
@@ -111,9 +116,13 @@ for p in $(grep -v '^#' /opt/data/buzz-agents/enabled); do kill "$(cat /opt/data
 
 ## After a Hermes image update — re-verify
 
-1. `docker exec hermes-agent-7qpk-hermes-agent-1 /opt/data/bin/buzz-acp --version` runs.
+The agent config, supervisor, and wrapper source are all under `/opt/data` and
+survive. The host crontab survives (it's on the host). Only `/usr/local/bin/buzz`
+is lost, and the watchdog restores it within a minute.
+
+1. `docker exec hermes-agent-7qpk-hermes-agent-1 /opt/data/bin/buzz-acp --help | head -1` runs.
 2. `docker exec -u hermes -e HOME=/opt/data hermes-agent-7qpk-hermes-agent-1 /opt/hermes/.venv/bin/hermes -p default acp --check` still passes (the `-p` selector is unchanged).
-3. Within a minute: one `buzz-acp` per enabled agent (`pgrep -af buzz-acp`) and `/usr/local/bin/buzz` is the wrapper (`head -3 /usr/local/bin/buzz`).
+3. Within a minute: one `buzz-acp` per enabled agent (`docker exec … pgrep -af buzz-acp`) and `/usr/local/bin/buzz` is the wrapper (`docker exec … head -3 /usr/local/bin/buzz`).
 4. `@mention` one agent as owner in `#hermes` → it replies from its own identity.
 
 ## Phase 2
