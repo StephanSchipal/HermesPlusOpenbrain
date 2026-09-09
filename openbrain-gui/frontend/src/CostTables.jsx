@@ -68,10 +68,9 @@ function Table({ title, rows, labelKey, labelHeader, onRowClick, botColumn, exte
               <td>
                 {usd(r.cost_usd)}
                 {externalMatch && (
-                  <em className="cost-note"
-                      title={`Not priced by Hermes (counted as $0 above) -- tracked by hand in External costs as "${externalMatch.name}"`}>
-                    {' '}(see External costs: {usd(externalMatch.usd)})
-                  </em>
+                  <span className="info-icon" title={`Not priced by Hermes (counted as $0 above) -- tracked by hand in External costs as "${externalMatch.name}": ${usd(externalMatch.usd)}`}>
+                    ⓘ
+                  </span>
                 )}
               </td>
               <td>{total ? `${((r.cost_usd / total) * 100).toFixed(0)}%` : '—'}</td>

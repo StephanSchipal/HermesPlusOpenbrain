@@ -195,7 +195,7 @@ export default function ExternalCostGrid({ onTotalsChange, onRowsChange }) {
                 </span>
               </td>
               <td>
-                <input value={row.comments || ''}
+                <input value={row.comments || ''} title={row.comments || ''}
                        onChange={(e) => patch(idx, { comments: e.target.value })} />
               </td>
               <td>
