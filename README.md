@@ -551,14 +551,16 @@ port requirement, the cutover steps, and how to reverse it:
 ## Related: Buzz relay (self-hosted Nostr collaboration)
 
 Another separate stack on the same VPS — not part of OpenBrain, but deployed alongside it the same
-git-from-checkout way (own compose project `buzz`, behind the existing Traefik). Self-hosted
-[Buzz](https://github.com/block/buzz) — Block's Nostr collaboration platform (team chat, code repos,
-workflows, human + AI agents in shared rooms). Compose: `deploy/docker-compose.buzz.yml`.
+git-from-checkout way (own compose project `buzz`, behind the existing Traefik, no bundled Caddy).
+Self-hosted [Buzz](https://github.com/block/buzz) — Block's Nostr collaboration platform (team chat,
+code repos, workflows, human + AI agents in shared rooms). Five containers — relay + Postgres +
+Redis + MinIO — from `deploy/docker-compose.buzz.yml` (image pinned to `ghcr.io/block/buzz:sha-<7>`,
+Buzz publishes no semver image tags). Closed relay; the owner community and its `general` /
+`Welcome` channels are bootstrapped on first boot from `RELAY_OWNER_PUBKEY`.
 
 > Status: **Live** since 2026-09-09 — `https://buzz.srv1608402.hstgr.cloud` (`wss://` for the Nostr relay)
 
-Full details, container map, first-deploy runbook, member admin, upgrade, and backup/restore:
-[`BuzzDocu.md`](BuzzDocu.md).
+Container map, redeploy / upgrade runbook, member admin, and backup/restore: [`buzz.md`](buzz.md).
 
 ## License
 

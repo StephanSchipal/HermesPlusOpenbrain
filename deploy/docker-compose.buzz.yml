@@ -21,7 +21,7 @@
 #      only :main / :latest / sha-<7> image tags (no semver), so we pin sha-<7>.
 #
 # Deploy:  cd deploy && docker compose -f docker-compose.buzz.yml up -d --wait
-# Ops ref: ../BuzzDocu.md
+# Ops ref: ../buzz.md
 
 name: buzz
 
