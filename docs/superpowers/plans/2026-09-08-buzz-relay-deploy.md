@@ -10,7 +10,7 @@
 
 **Design doc:** [`docs/superpowers/specs/2026-09-08-buzz-relay-deploy-design.md`](../specs/2026-09-08-buzz-relay-deploy-design.md)
 
-**Upstream reference:** `github.com/block/buzz`, `deploy/compose/compose.yml` at commit `7012d86d52fd188b27c7beedeaa132d9c1f61fa8` (repo main `3c7f288` on 2026-09-05). Latest relay image release tag: `v0.5.2`.
+**Upstream reference:** `github.com/block/buzz`, `deploy/compose/compose.yml` at commit `7012d86d52fd188b27c7beedeaa132d9c1f61fa8` (repo main `3c7f288` on 2026-09-05). Buzz publishes no semver image tags — only `:main`, `:latest`, `sha-<7>` — so `BUZZ_IMAGE` is pinned to `sha-3c7f288` (the `main` commit this branch is based on).
 
 ---
 
@@ -75,7 +75,7 @@ name: buzz
 
 services:
   relay:
-    image: ${BUZZ_IMAGE:-ghcr.io/block/buzz:v0.5.2}
+    image: ${BUZZ_IMAGE:-ghcr.io/block/buzz:sha-3c7f288}
     environment:
       BUZZ_BIND_ADDR: 0.0.0.0:3000
       BUZZ_HEALTH_PORT: "8080"
@@ -267,7 +267,7 @@ Add these lines to the end of `deploy/.env.example`:
 
 # --- buzz (docker-compose.buzz.yml) ---------------------------------------
 # Relay image. Pin a release tag for production (not :main). Tags: https://github.com/block/buzz/tags
-BUZZ_IMAGE=ghcr.io/block/buzz:v0.5.2
+BUZZ_IMAGE=ghcr.io/block/buzz:sha-3c7f288
 
 # Public host. Covered by the *.srv1608402.hstgr.cloud wildcard -- no DNS record needed.
 BUZZ_DOMAIN=buzz.srv1608402.hstgr.cloud
@@ -639,7 +639,7 @@ cd /root/HermesPlusOpenbrain/deploy
 cat >> .env <<EOF
 
 # --- buzz (added $(date -Is)) ---
-BUZZ_IMAGE=ghcr.io/block/buzz:v0.5.2
+BUZZ_IMAGE=ghcr.io/block/buzz:sha-3c7f288
 BUZZ_DOMAIN=buzz.srv1608402.hstgr.cloud
 RELAY_OWNER_PUBKEY=REPLACE_WITH_HEX_FROM_TASK_8
 BUZZ_RELAY_PRIVATE_KEY=$(openssl rand -hex 32)

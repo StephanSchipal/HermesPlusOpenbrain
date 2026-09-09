@@ -76,8 +76,9 @@ optional overlay `compose.caddy.yml` (`BUZZ_COMPOSE_TLS=true`), which adds a
 
 `.env.example` production defaults worth keeping: `BUZZ_REQUIRE_AUTH_TOKEN=true`,
 `BUZZ_REQUIRE_RELAY_MEMBERSHIP=true` (closed relay — only members join),
-`BUZZ_AUTO_MIGRATE=true`. Server release tags: latest is `v0.5.2`
-(the `desktop-v*` tags are the desktop app, not the relay image).
+`BUZZ_AUTO_MIGRATE=true`. The relay image is published only as `:main`,
+`:latest`, and `sha-<7>` (git `v0.x` tags are not pushed as image tags) — pin
+`sha-<7>`.
 
 Required identity / secret env:
 

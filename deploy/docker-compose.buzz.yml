@@ -17,7 +17,8 @@
 #   6. Postgres/Redis .env keys prefixed BUZZ_ (POSTGRES_PASSWORD etc. are already
 #      taken by the openbrain stack in the shared deploy/.env). In-container var
 #      names are left as upstream expects.
-#   7. BUZZ_IMAGE default pinned to a release tag, not :main
+#   7. BUZZ_IMAGE default pinned to an exact commit tag, not :main. Buzz publishes
+#      only :main / :latest / sha-<7> image tags (no semver), so we pin sha-<7>.
 #
 # Deploy:  cd deploy && docker compose -f docker-compose.buzz.yml up -d --wait
 # Ops ref: ../BuzzDocu.md
@@ -26,7 +27,7 @@ name: buzz
 
 services:
   relay:
-    image: ${BUZZ_IMAGE:-ghcr.io/block/buzz:v0.5.2}
+    image: ${BUZZ_IMAGE:-ghcr.io/block/buzz:sha-3c7f288}
     environment:
       BUZZ_BIND_ADDR: 0.0.0.0:3000
       BUZZ_HEALTH_PORT: "8080"
