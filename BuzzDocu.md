@@ -1,9 +1,17 @@
 # Buzz relay on srv1608402
 
-**Status: PLANNED.** Flip to "DONE & LIVE" once Task 10 verification passes.
+**Status: DONE & LIVE since 2026-09-09.** Deployed to `srv1608402`, healthy on
+first boot, verified (HTTPS + LE cert, NIP-11, `wss://` 101 upgrade through
+Traefik, owner in the membership roster, no regression to the existing stack).
+This file is now the redeploy / upgrade / backup runbook.
 
 Self-hosted [Buzz](https://github.com/block/buzz) — Block's Nostr collaboration
 platform (team chat, code repos, workflows, human + AI agents in shared rooms).
+
+- Relay image: `ghcr.io/block/buzz:sha-3c7f288` (no semver image tags upstream — pin `sha-<7>`).
+- Relay's advertised identity (`self` in NIP-11): `9ee115fce4243dff3e2c280144fff19e5286daebac9dedf9680bf5d7c7e5168b`.
+- Owner (`RELAY_OWNER_PUBKEY`): `f978cb69…56aa6` — Stephan's Buzz desktop identity; nsec in the password manager, keypair is device-bound to that machine.
+- `deploy/.env` backup before the buzz block was added: `deploy/.env.pre-buzz-20260909` on the VPS.
 
 ## What runs
 
@@ -22,19 +30,27 @@ Vendored compose — upstream is `block/buzz` `deploy/compose/compose.yml` at
 commit `7012d86`. See the header of `deploy/docker-compose.buzz.yml` for the
 delta list. Upstream's `compose.caddy.yml` is deliberately not used.
 
-## First deploy
+## Redeploy from scratch
 
-See `docs/superpowers/plans/2026-09-08-buzz-relay-deploy.md` Tasks 7–10.
-Summary:
+If the stack is ever wiped (volumes intact = data survives):
 
-1. Create the owner identity in the Buzz **desktop app**, back up its `nsec` to
-   your password manager, convert the `npub` to 64-hex.
-2. On the VPS: `cd /root/HermesPlusOpenbrain && git pull --ff-only`.
-3. Add the `BUZZ_*` block to `deploy/.env` with generated secrets (see
-   `deploy/.env.example`). `RELAY_OWNER_PUBKEY` = the hex from step 1.
+1. Owner identity: the Buzz **desktop app** shows the pubkey as raw hex under
+   Settings → Identity (no `npub` conversion needed). `RELAY_OWNER_PUBKEY` = that hex.
+   The private key is device-bound — back up the `nsec` (Settings → Private key →
+   Reveal) to a password manager or the owner role is unrecoverable.
+2. VPS host shell (NOT the hermes-agent container — use hPanel → Browser terminal
+   if your SSH key lands you in `/opt/hermes`):
+   `cd /root/HermesPlusOpenbrain && git pull --ff-only`.
+3. `deploy/.env` needs the `BUZZ_*` block (see `deploy/.env.example`). Secrets:
+   `openssl rand -hex 32` each. `BUZZ_IMAGE` = a `sha-<7>` tag from
+   `github.com/block/buzz` commits.
 4. `cd deploy && docker compose -f docker-compose.buzz.yml up -d --wait`.
-5. Verify (Task 10): HTTPS 200 + valid cert, NIP-11 JSON, `wss://` handshake,
-   owner recognised in the desktop app. Check no other service regressed.
+5. Verify: `curl -sI https://buzz.srv1608402.hstgr.cloud/` (200 + cert);
+   `curl -H 'Accept: application/nostr+json' https://buzz.srv1608402.hstgr.cloud/`
+   (NIP-11 JSON); `curl -o /dev/null -w '%{http_code}' --http1.1 -H 'Connection: Upgrade'
+   -H 'Upgrade: websocket' -H 'Sec-WebSocket-Version: 13'
+   -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' https://buzz.srv1608402.hstgr.cloud/`
+   (expect 101). Then add the relay in the desktop app and confirm owner/admin.
 
 ## Members
 

@@ -555,7 +555,7 @@ git-from-checkout way (own compose project `buzz`, behind the existing Traefik).
 [Buzz](https://github.com/block/buzz) — Block's Nostr collaboration platform (team chat, code repos,
 workflows, human + AI agents in shared rooms). Compose: `deploy/docker-compose.buzz.yml`.
 
-> Status: **Planned** — `https://buzz.srv1608402.hstgr.cloud` (`wss://` for the Nostr relay)
+> Status: **Live** since 2026-09-09 — `https://buzz.srv1608402.hstgr.cloud` (`wss://` for the Nostr relay)
 
 Full details, container map, first-deploy runbook, member admin, upgrade, and backup/restore:
 [`BuzzDocu.md`](BuzzDocu.md).
