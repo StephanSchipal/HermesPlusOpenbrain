@@ -9,15 +9,21 @@ member identities, via `buzz-acp` → `hermes -p <profile> acp`.
 - Spike findings: [`docs/superpowers/notes/2026-09-09-hermes-buzz-agents-spike.md`](docs/superpowers/notes/2026-09-09-hermes-buzz-agents-spike.md)
 - Plan: [`docs/superpowers/plans/2026-09-09-hermes-buzz-agents.md`](docs/superpowers/plans/2026-09-09-hermes-buzz-agents.md)
 
-## As deployed (2026-09-09)
+## As deployed (2026-09-09) — all 7 profiles
 
 | Profile | Buzz display name | pubkey (hex) | model |
 | --- | --- | --- | --- |
 | `default` | **`Hermes`** | `3164087055f1f9a4a38ab834073e9155e3c3b41ed8ae31e2ee0f7deadf7e7a2b` | claude-sonnet-5 |
-| `openbrain` | **`Hermes-openbrain`** | `dacaf9735c2b0379b99f5f98602c3454acde93006feaa7da0e92bd6dfaa61481` | moonshotai/kimi-k3 |
+| `openbrain` | `Hermes-openbrain` | `dacaf9735c2b0379b99f5f98602c3454acde93006feaa7da0e92bd6dfaa61481` | moonshotai/kimi-k3 |
+| `writer` | `Hermes-writer` | `f8106def1d2e9ed3ece52699deed58868d6fb8a62ee61533da785ca61e7a21d8` | claude-sonnet-5 |
+| `coder` | `Hermes-coder` | `cdb1cc56fb54efa70e852be7bec5c619e9345da958c80f692e6983f032763e47` | claude-sonnet-5 |
+| `designer` | `Hermes-designer` | `5a3bf86edf7a0b5da05b52a37f5eb70caf8e0798fb7f60bd108f90abf595b2ee` | claude-sonnet-5 |
+| `master` | `Hermes-master` | `acef1046772ae43f0810c6e171c75efca5f5c2b499d36227ec15c6953007fc4f` | claude-sonnet-5 |
+| `researcher` | `Hermes-researcher` | `0f4a3784b63935869420a54bf7fb60cd7add32bcf92d568324b3d8897252b04d` | claude-sonnet-5 |
 
 Naming: the `default` agent is just **`Hermes`**; every other profile is
-`Hermes-<profile>`. (`default` was renamed off `Hermes-default` to avoid a
+`Hermes-<profile>`. All 7 run; each is added to whichever channels it should
+see via the desktop app (they only respond in channels they're members of). (`default` was renamed off `Hermes-default` to avoid a
 collision with a leftover spike identity still listed as a `#hermes` member —
 harmless, the Buzz desktop's member-remove menu is currently unclickable for
 that row.)
@@ -29,7 +35,8 @@ that row.)
 - Host crontab: `* * * * * /root/HermesPlusOpenbrain/scripts/buzz-agents-watchdog.sh`.
 - Verified: owner @mentions `@Hermes` and `@Hermes-openbrain` in `#hermes`, each
   replies from its own identity with its own toolset — `default` did a real
-  `laptop_fs` check, `openbrain` a real `openbrain stats` (133 captures).
+  `laptop_fs` check, `openbrain` a real `openbrain stats` (133 captures). The
+  other five were added 2026-09-09 the same way.
 
 **Known limitation:** a mention that arrives during the ~40 s window when the
 Hermes container is restarting (e.g. the `laptop_fs` watchdog's `docker restart`
