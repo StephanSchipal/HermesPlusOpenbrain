@@ -553,24 +553,32 @@ port requirement, the cutover steps, and how to reverse it:
 Another separate stack on the same VPS — not part of OpenBrain, but deployed alongside it the same
 git-from-checkout way (own compose project `buzz`, behind the existing Traefik, no bundled Caddy).
 Self-hosted [Buzz](https://github.com/block/buzz) — Block's Nostr collaboration platform (team chat,
-code repos, workflows, human + AI agents in shared rooms). Five containers — relay + Postgres +
-Redis + MinIO — from `deploy/docker-compose.buzz.yml` (image pinned to `ghcr.io/block/buzz:sha-<7>`,
-Buzz publishes no semver image tags). Closed relay; the owner community and its `general` /
-`Welcome` channels are bootstrapped on first boot from `RELAY_OWNER_PUBKEY`.
+code repos, workflows, human + AI agents in shared rooms). From `deploy/docker-compose.buzz.yml`
+(image pinned to `ghcr.io/block/buzz:sha-<7>`, Buzz publishes no semver image tags):
 
-> Status: **Live** since 2026-09-09 — `https://buzz.srv1608402.hstgr.cloud` (`wss://` for the Nostr relay)
+- **relay** + Postgres + Redis + MinIO — the closed relay (`BUZZ_REQUIRE_RELAY_MEMBERSHIP=true`);
+  the owner community and its `general` / `Welcome` channels bootstrap on first boot from
+  `RELAY_OWNER_PUBKEY`.
+- **pair-relay** — a stateless `buzz-pair-relay` sidecar at `wss://buzzpair.srv1608402.hstgr.cloud`
+  for NIP-AB device pairing (desktop QR → phone), so pairing doesn't route through Block's
+  `pairing.buzz.xyz`. Advertised in the relay's NIP-11 via `BUZZ_PAIR_DOMAIN`.
 
-Container map, redeploy / upgrade runbook, member admin, and backup/restore: [`buzz.md`](buzz.md).
+> Status: **Live** since 2026-09-09 — `https://buzz.srv1608402.hstgr.cloud` (`wss://` for the Nostr
+> relay). Owner desktop + phone paired; 7 Hermes agents connected.
+
+Container map, redeploy / upgrade runbook, member admin, phone pairing, and backup/restore:
+[`buzz.md`](buzz.md).
 
 ### Hermes agents in Buzz
 
-Each Hermes profile can join Buzz channels as its own member identity, via
-`buzz-acp` bridging `hermes -p <profile> acp`. Runs inside the Hermes container,
-host-cron-supervised, all state under `/opt/data`. v1: `--respond-to owner-only`
-is the trust boundary; agents otherwise have their full Hermes capability. Code
-changes go through Buzz-native feature-branch review.
+All 7 Hermes profiles join Buzz channels as their own member identities, via `buzz-acp` bridging
+`hermes -p <profile> acp` — `default` answers as `@Hermes`, the rest as `@Hermes-<profile>`. Runs
+inside the Hermes container, host-cron-supervised, all state under `/opt/data`. Reply auth is a
+`buzz` CLI wrapper (the Hermes terminal sandbox strips `BUZZ_*` from the env). v1:
+`--respond-to owner-only` is the trust boundary; agents otherwise have their full Hermes
+capability. Code changes go through Buzz-native feature-branch review.
 
-> Status: **v1 Live** since 2026-09-09 (`default` as `@Hermes`, `openbrain` as `@Hermes-openbrain` in `#hermes`) — see [`buzz-agents.md`](buzz-agents.md)
+> Status: **v1 Live** since 2026-09-09 — all 7 profiles in `#hermes`; see [`buzz-agents.md`](buzz-agents.md)
 
 ## License
 

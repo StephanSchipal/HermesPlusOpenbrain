@@ -151,6 +151,25 @@ the `pg_dump` into `buzz`, untar the volumes, then start `relay`.
 Off-box shipping of `/root/backups/buzz/` is a follow-up (same gap the rest of
 the stack has today).
 
+## Change log
+
+Changes to the relay stack since the initial deploy ([PR #16](https://github.com/StephanSchipal/HermesPlusOpenbrain/pull/16)):
+
+- **2026-09-09 — `pair-relay` sidecar.** Added a stateless `buzz-pair-relay`
+  service (same image, `entrypoint: buzz-pair-relay`) behind Traefik at
+  `wss://buzzpair.srv1608402.hstgr.cloud` (`BUZZ_PAIR_DOMAIN`), and set
+  `BUZZ_PAIRING_RELAY_URL` on the relay so its NIP-11 advertises it. The Buzz
+  mobile app onboards only via NIP-AB pairing (no nsec import); without a
+  pairing relay the desktop hits a dead `<relay>/pair` (404) and the QR does
+  nothing. Deployed with `docker compose -f docker-compose.buzz.yml up -d`
+  (recreates `buzz-relay-1`, ~10 s blip; clients auto-reconnect). Verified:
+  NIP-11 shows `pairing_relay_url`, `wss://buzzpair…/` → `101`, owner's phone
+  paired. See "Adding a phone" above.
+- **2026-09-09 — Hermes agents.** All 7 Hermes profiles bridged into channels
+  as member identities. Separate stack (inside the Hermes container, not this
+  compose project) — runbook [`buzz-agents.md`](buzz-agents.md),
+  [PR #18](https://github.com/StephanSchipal/HermesPlusOpenbrain/pull/18).
+
 ## Phase 2 (not built)
 
 Moderation dashboard (`BUZZ_ADMIN_HOST=admin.buzz.srv1608402.hstgr.cloud`,
