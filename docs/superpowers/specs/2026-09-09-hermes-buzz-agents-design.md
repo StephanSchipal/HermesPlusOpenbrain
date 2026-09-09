@@ -76,6 +76,10 @@ Config is all env vars (matching CLI flags):
 | `BUZZ_ACP_AGENT_COMMAND` | `goose` | agent binary to spawn → **`hermes`** |
 | `BUZZ_ACP_AGENT_ARGS` | `acp` | agent args (comma-split) → **`acp`** (+ profile selector once known) |
 | `BUZZ_ACP_MCP_COMMAND` | `""` | optional extra MCP server — **unused** (Hermes carries its own) |
+| `--permission-mode` (env name TBD, Task 0) | `bypass-permissions` | **must be set to `dont-ask`** |
+| `--respond-to` / `BUZZ_ACP_RESPOND_TO` | `owner-only` | author gate — v1 keeps `owner-only` |
+| `BUZZ_ACP_AGENT_OWNER` | — | owner pubkey (hex) — **required** for the gate to work |
+| `--agents` / `BUZZ_ACP_AGENTS` | `1` | subprocesses per agent — keep `1` |
 | `BUZZ_ACP_IDLE_TIMEOUT` | `620` | max seconds of agent silence before cancelling a turn |
 | `BUZZ_ACP_MAX_TURN_DURATION` | `7200` | absolute per-turn wall-clock cap |
 | `BUZZ_API_TOKEN` | — | "required if relay enforces token auth" — **source unconfirmed**, resolved in Task 0 |
@@ -85,12 +89,25 @@ Behaviour verified from source (`crates/buzz-acp/src/acp.rs`, `config.rs`):
 - On `session/request_permission` from the agent, buzz-acp **auto-approves**
   (`allow_once`; falls back to `reject_once` if no allow option). **There is no
   post-to-channel / wait-for-owner approval flow.**
-- `PermissionMode` (sent to the agent via `session/set_config_option`):
-  `default` | `acceptEdits` | `bypassPermissions` | **`dontAsk`** ("never
-  prompt; reject anything that would require permission").
+- `--permission-mode` (env likely `BUZZ_ACP_PERMISSION_MODE`; sent to the agent
+  via `session/set_config_option`): `default` | `accept-edits` |
+  `bypass-permissions` | **`dont-ask`** ("never prompt; reject anything that
+  would require permission") | `plan` (no tool execution at all).
+  **The buzz-acp default is `bypass-permissions`** (fully autonomous) — v1 must
+  set `dont-ask` **explicitly** in every agent's config.
+- **Author gate `--respond-to`** (env `BUZZ_ACP_RESPOND_TO`), default
+  **`owner-only`**: forwards to the agent only events from
+  `BUZZ_ACP_AGENT_OWNER`. Other values: `allowlist`
+  (`BUZZ_ACP_RESPOND_TO_ALLOWLIST` = comma-sep hex pubkeys, owner always
+  included), `anyone`, `nobody`. Disallowed authors are dropped before any
+  subscription/mention logic. Owner control commands (`!shutdown`, `!cancel`,
+  `!rotate` — kind:9, exact body, separate `p`-tag mention) are handled by the
+  harness regardless of gate.
+- `BUZZ_ACP_AGENT_OWNER` — the agent's registered owner pubkey. Without it,
+  `owner-only`/`allowlist` drop everything.
 - Discovers channels the agent is a **member** of (`GET /api/channels?member=true`);
   auto-subscribes on new membership.
-- One process per agent; each needs its own keypair.
+- One `buzz-acp` process per agent (`--agents 1`); each needs its own keypair.
 - Not published as a binary — built from the crate (`cargo build --release -p buzz-acp`).
 
 ### 2.3 Buzz-native code review (why "approve each action" works for git)
@@ -137,6 +154,8 @@ Done by hand in the live Hermes container; nothing committed except notes:
 Must resolve before the plan proceeds:
 
 - **Profile selection** for `hermes acp` (flag / env / alias wrapper).
+- **`--permission-mode` env var name** and that `dont-ask` is honoured by
+  `hermes acp` (i.e. Hermes actually rejects a write when asked).
 - **`BUZZ_API_TOKEN`**: needed, or does member-key NIP-42 satisfy the HTTP
   bridge? If needed, where is it minted?
 - **Headless approval**: does `hermes acp` block on a TTY prompt for any tool?
@@ -160,8 +179,12 @@ All under `/opt/data` so a Hermes image update cannot remove it:
   bin/buzz-acp                       # musl-static, pinned commit recorded in buzz-agents.md
   buzz-agents/
     enabled                          # newline list of profile names to run  (the "launch N of 7" knob)
-    default.env  coder.env  …        # per-agent: BUZZ_PRIVATE_KEY, profile selector, BUZZ_RELAY_URL,
-                                      #   BUZZ_ACP_IDLE_TIMEOUT, BUZZ_API_TOKEN?  (chmod 600)
+    default.env  coder.env  …        # per-agent (chmod 600): BUZZ_PRIVATE_KEY, profile selector,
+                                      #   BUZZ_RELAY_URL, BUZZ_ACP_AGENT_COMMAND=hermes,
+                                      #   BUZZ_ACP_PERMISSION_MODE=dont-ask,
+                                      #   BUZZ_ACP_RESPOND_TO=owner-only,
+                                      #   BUZZ_ACP_AGENT_OWNER=<owner hex>,
+                                      #   BUZZ_ACP_IDLE_TIMEOUT, BUZZ_API_TOKEN?
     supervise.sh                      # for each name in `enabled`: ensure one buzz-acp is running,
                                       #   restart with backoff on exit, structured log to buzz-agents/<name>.log
 ```
@@ -189,17 +212,30 @@ All under `/opt/data` so a Hermes image update cannot remove it:
 
 ### 3.5 Capability model (v1)
 
-- Every agent runs `dontAsk` → structurally cannot run shell, edit the live
-  filesystem, `openbrain save`, or `laptop_fs` writes. Can read/search (OpenBrain
-  recall, web, read files), reason, draft, and discuss.
+Two independent gates, both set explicitly per agent:
+
+**Who may address an agent — `--respond-to owner-only`.** The relay currently
+has one human member (the owner). `owner-only` + `BUZZ_ACP_AGENT_OWNER=<owner
+hex>` means only the owner drives the agents; everyone else in a channel sees
+the replies but cannot instruct them. When teammates join the relay, the
+documented step is `--respond-to allowlist` with their pubkeys (or `anyone` for
+a fully open agent). This gate is what makes v1's read-exfil exposure a
+non-issue: the only person who can make an agent read and echo something is the
+owner.
+
+**What an agent may do — `--permission-mode dont-ask`.** Set explicitly (the
+buzz-acp default `bypass-permissions` is *fully autonomous* and must never be
+used here). `dont-ask` → the agent structurally cannot run shell, edit the live
+filesystem, `openbrain save`, or `laptop_fs` writes. It can read/search
+(OpenBrain recall, web, read files), reason, draft, and discuss.
 - **Code:** an agent may `git push` a **feature branch** (becomes a review
   channel with the diff). Protected branches (`main`, …) carry `buzz-protect`
   tags — the relay refuses the merge without the owner's signed `kind:46011`
   approval. Configure branch protection on any repo an agent can touch.
 - Stripe MCP: read-only key already; no action needed.
-- Accepted v1 exposure: a channel member can instruct an agent to *read*
-  OpenBrain memory or repo files and repeat it in-channel. Revisited with the
-  phase-2 approval bridge.
+- With `owner-only`, the read-and-echo exposure is limited to the owner. When
+  the gate is later opened to `allowlist`/`anyone`, that exposure returns and is
+  the trigger for building the phase-2 approval bridge.
 
 ### 3.6 Channels
 
@@ -232,7 +268,8 @@ launched agents. The owner adds an agent to further channels as desired
 | `hermes acp` blocks on a TTY approval prompt headless | Task 0 gates on this; `--accept-hooks` + `dontAsk` expected to suffice; escalate if not |
 | Profile selection for `hermes acp` not possible | Task 0 gates on this; fall back to alias wrappers or a per-profile `HERMES_HOME` |
 | Hermes image update removes the binary / stops the agents | `/opt/data` + cron pattern (proven by voice); `buzz-agents.md` has a re-verify checklist; cron re-launches within a minute |
-| Prompt-injection via a channel member → data read + echo | `dontAsk` blocks all writes/exec; read exposure accepted for v1, closed by the phase-2 approval bridge |
+| Prompt-injection via a channel member → data read + echo | `--respond-to owner-only` means only the owner can drive an agent in v1; `dont-ask` blocks all writes/exec regardless. Opening the gate later is the trigger for the phase-2 approval bridge |
+| buzz-acp default `--permission-mode` is `bypass-permissions` (autonomous) | v1 sets `dont-ask` explicitly in every env file; Task 0 confirms the mode is applied (agent declines a write) |
 | `buzz-acp` upstream changes break the pinned build | Commit pinned in `buzz-agents.md`; rebuild is a documented step |
 | `BUZZ_API_TOKEN` unobtainable / bridge auth unclear | Task 0 resolves; NIP-42 member-key auth may already satisfy it |
 | Two agents added to the roster same-second | Add one at a time, `sleep 1` (as with relay members) |
@@ -245,8 +282,9 @@ launched agents. The owner adds an agent to further channels as desired
 2. Post-deploy: `enabled` lists the launch set; `supervise.sh` shows one
    `buzz-acp` per name; each agent authenticates (relay log `NIP-42 auth
    successful` for its pubkey).
-3. `dontAsk` holds: ask an agent to write a file / run a command → it declines,
-   nothing executes.
+3. `dont-ask` holds: ask an agent (as the owner) to write a file / run a
+   command → it declines, nothing executes. `owner-only` holds: a message from
+   a non-owner pubkey gets no agent response.
 4. Code path: an agent pushes a feature branch on a test repo → review channel
    appears with the diff; a push to `main` is refused without a signed approval.
 5. Regression: voice / WhatsApp / CLI gateways and the Buzz relay unaffected;
