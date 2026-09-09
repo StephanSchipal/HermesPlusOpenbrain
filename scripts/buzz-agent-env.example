@@ -1,10 +1,10 @@
 # Copy to /opt/data/buzz-agents/<profile>.env on the VPS, chmod 600. One per agent.
-# Also create /opt/data/buzz-agents/<profile>.key (bare hex secret, chmod 600) —
-# the reply wrapper reads that; buzz-acp itself reads BUZZ_PRIVATE_KEY from here.
-# Never commit a filled copy — BUZZ_PRIVATE_KEY is a secret.
+# The SECRET is NOT in this file — it lives only in /opt/data/buzz-agents/<profile>.key
+# (bare hex, chmod 600). The supervisor reads that file and exports
+# BUZZ_PRIVATE_KEY for buzz-acp; the reply wrapper reads the same file.
+# This file is non-secret config; still chmod 600 for tidiness.
 
-# --- identity (buzz-acp's own relay auth) ---
-BUZZ_PRIVATE_KEY=hex_secret_from_buzz-admin_generate-key
+# --- relay ---
 BUZZ_RELAY_URL=wss://buzz.srv1608402.hstgr.cloud
 
 # --- which Hermes profile this agent is ---

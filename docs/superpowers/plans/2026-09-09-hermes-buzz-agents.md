@@ -311,12 +311,11 @@ Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>"
 
 ```sh
 # Copy to /opt/data/buzz-agents/<profile>.env on the VPS, chmod 600. One per agent.
-# Also create /opt/data/buzz-agents/<profile>.key (bare hex, chmod 600) — the
-# reply wrapper reads that; buzz-acp itself reads BUZZ_PRIVATE_KEY from here.
-# Never commit a filled copy — BUZZ_PRIVATE_KEY is a secret.
+# The SECRET is NOT here — it lives only in /opt/data/buzz-agents/<profile>.key
+# (bare hex, 0600). The supervisor reads it -> BUZZ_PRIVATE_KEY for buzz-acp;
+# the reply wrapper reads the same file. This file is non-secret config.
 
-# --- identity (buzz-acp's own relay auth) ---
-BUZZ_PRIVATE_KEY=hex_secret_from_buzz-admin_generate-key
+# --- relay ---
 BUZZ_RELAY_URL=wss://buzz.srv1608402.hstgr.cloud
 
 # --- which Hermes profile this agent is ---
@@ -588,45 +587,51 @@ Keep `/opt/data/bin/{buzz-acp,buzz.real,buzz-acp.version}`. Leave `#hermes`
 
 Default proposal: `default` + `openbrain` (two identities, exercises per-profile key selection in Task 9). The owner may name any subset of the 7.
 
-- [ ] **Step 2: Per agent — key, roster, env, key file**
+- [ ] **Step 2: Per agent — key (0600, never printed), roster, env**
 
-For each profile in the set:
+`RC=buzz-relay-1 HC=hermes-agent-7qpk-hermes-agent-1`. For each profile `P` in the set:
 ```bash
-docker exec buzz-relay-1 /usr/local/bin/buzz-admin generate-key   # save secret -> password manager, entry "Buzz agent — hermes/<profile>"
-cd /root/HermesPlusOpenbrain/deploy
-docker compose -f docker-compose.buzz.yml exec relay /usr/local/bin/buzz-admin add-member --pubkey <hex> --role member
+docker exec "$HC" mkdir -p /opt/data/buzz-agents
+docker exec "$RC" /usr/local/bin/buzz-admin generate-key > /tmp/gk 2>&1
+PUB=$(awk '/Public key:/{print $NF}' /tmp/gk)
+awk '/Secret key:/{print $NF}' /tmp/gk \
+  | docker exec -i "$HC" sh -c "cat > /opt/data/buzz-agents/$P.key && chmod 600 /opt/data/buzz-agents/$P.key"
+rm -f /tmp/gk
+docker exec "$RC" /usr/local/bin/buzz-admin add-member --pubkey "$PUB" --role member
 sleep 1
-mkdir -p /opt/data/buzz-agents
-cp /root/HermesPlusOpenbrain/scripts/buzz-agent-env.example /opt/data/buzz-agents/<profile>.env
-sed -i "s/^BUZZ_PRIVATE_KEY=.*/BUZZ_PRIVATE_KEY=<hex-secret>/; s/-p,PROFILE,acp/-p,<profile>,acp/" /opt/data/buzz-agents/<profile>.env
-printf '%s\n' '<hex-secret>' > /opt/data/buzz-agents/<profile>.key
-chmod 600 /opt/data/buzz-agents/<profile>.env /opt/data/buzz-agents/<profile>.key
+docker exec "$HC" sh -c "sed 's|-p,PROFILE,acp|-p,$P,acp|' /opt/data/buzz-agents-staging/buzz-agent-env.example > /opt/data/buzz-agents/$P.env && chmod 600 /opt/data/buzz-agents/$P.env"
+echo "$P pubkey $PUB"
+docker exec "$HC" cat /opt/data/buzz-agents/$P.key   # -> owner copies to password manager, then clears scrollback
 ```
-Do the members one at a time, `sleep 1` between (roster is one event).
+Members one at a time, `sleep 1` between (roster is one event). The secret only
+ever transits the `awk | docker exec -i` pipe and the final `cat` the owner runs
+for the password manager — never a script variable, never argv.
+(`/opt/data/buzz-agents-staging/` holds the repo scripts until Task 10's `git pull`; after that, use `/root/HermesPlusOpenbrain/scripts/`.)
 
 - [ ] **Step 3: Stage scripts + `enabled`**
 
 ```bash
-cp /root/HermesPlusOpenbrain/scripts/buzz-agent-supervise.sh /opt/data/buzz-agents/supervise.sh
-cp /root/HermesPlusOpenbrain/scripts/buzz-wrap.sh            /opt/data/buzz-agents/buzz-wrap.sh
-chmod 755 /opt/data/buzz-agents/supervise.sh /opt/data/buzz-agents/buzz-wrap.sh
-printf 'default\nopenbrain\n' > /opt/data/buzz-agents/enabled   # one name per launched profile
+docker exec "$HC" sh -c '
+  install -m755 /opt/data/buzz-agents-staging/buzz-agent-supervise.sh /opt/data/buzz-agents/supervise.sh
+  install -m755 /opt/data/buzz-agents-staging/buzz-wrap.sh            /opt/data/buzz-agents/buzz-wrap.sh
+  printf "default\nopenbrain\n" > /opt/data/buzz-agents/enabled'
 ```
 
 - [ ] **Step 4: Verify config, no placeholders**
 
 ```bash
-for f in /opt/data/buzz-agents/*.env; do
-  grep -Eq 'hex_secret_from|PROFILE,acp' "$f" && echo "PLACEHOLDER in $f"
-  grep -q '^BUZZ_ACP_RESPOND_TO=owner-only' "$f" || echo "MISSING owner-only in $f"
-  grep -q '^BUZZ_ACP_AGENT_OWNER=f978cb69' "$f" || echo "MISSING owner in $f"
-done
-for p in $(grep -v '^#' /opt/data/buzz-agents/enabled); do
-  [ -s "/opt/data/buzz-agents/$p.key" ] || echo "MISSING key file for $p"
-done
-awk -F'[=,]' '/IDLE_TIMEOUT/{i=$2} /MAX_TURN_DURATION/{m=$2} END{ if(i>=m) print "IDLE>=MAX — buzz-acp will refuse to start" }' /opt/data/buzz-agents/*.env
+docker exec "$HC" sh -c '
+  cd /opt/data/buzz-agents
+  for f in *.env; do
+    grep -q "PROFILE,acp" "$f" && echo "PLACEHOLDER in $f"
+    grep -q "^BUZZ_ACP_RESPOND_TO=owner-only" "$f" || echo "MISSING owner-only in $f"
+    grep -q "^BUZZ_ACP_AGENT_OWNER=f978cb69" "$f" || echo "MISSING owner in $f"
+    grep -q "^BUZZ_PRIVATE_KEY=" "$f" && echo "SECRET LEAKED into $f (should be .key only)"
+    awk -F"[=,]" "/IDLE_TIMEOUT/{i=\$2} /MAX_TURN_DURATION/{m=\$2} END{if(i>=m) print \"IDLE>=MAX in \" FILENAME}" "$f"
+  done
+  for p in $(grep -v "^#" enabled); do [ -s "$p.key" ] || echo "MISSING key file for $p"; done
+  echo "(no output above = ok)"'
 ```
-Expected: no output.
 
 ---
 

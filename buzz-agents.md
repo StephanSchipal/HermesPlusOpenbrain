@@ -15,10 +15,11 @@ member identities, via `buzz-acp` → `hermes -p <profile> acp`.
 - `/opt/data/bin/buzz-acp` + `/opt/data/bin/buzz.real` — built from
   `block/buzz@3c7f288` (musl-static). `/opt/data/bin/buzz-acp.version` records
   the commit, build date, and sha256.
-- `/opt/data/buzz-agents/<profile>.env` (chmod 600) — `buzz-acp` config,
-  including `BUZZ_PRIVATE_KEY` (its own relay auth).
-- `/opt/data/buzz-agents/<profile>.key` (chmod 600) — the bare hex key; the
-  reply wrapper reads this.
+- `/opt/data/buzz-agents/<profile>.key` (chmod 600) — the bare hex secret.
+  **Single source of truth.** The supervisor reads it and exports
+  `BUZZ_PRIVATE_KEY` for `buzz-acp`; the reply wrapper reads the same file.
+- `/opt/data/buzz-agents/<profile>.env` (chmod 600) — non-secret `buzz-acp`
+  config (relay URL, profile selector, gate, turn caps).
 - `/opt/data/buzz-agents/enabled` — newline list of profile names to run. **The
   "launch N of 7" knob.** Blank lines and `#`-prefixed lines are ignored.
 - `/opt/data/buzz-agents/supervise.sh` — copy of
@@ -66,11 +67,19 @@ any repo an agent can touch.
 
 ## Add an agent
 
-1. `docker exec buzz-relay-1 /usr/local/bin/buzz-admin generate-key` — save the secret to the password manager (entry "Buzz agent — hermes/<profile>").
-2. `cd /root/HermesPlusOpenbrain/deploy && docker compose -f docker-compose.buzz.yml exec relay /usr/local/bin/buzz-admin add-member --pubkey <hex> --role member`
-3. `cp scripts/buzz-agent-env.example /opt/data/buzz-agents/<profile>.env`; set `BUZZ_PRIVATE_KEY`, replace `PROFILE` in `BUZZ_ACP_AGENT_ARGS`; `chmod 600`.
-4. `printf '%s\n' '<hex-secret>' > /opt/data/buzz-agents/<profile>.key && chmod 600 /opt/data/buzz-agents/<profile>.key`
-5. Add `<profile>` on its own line to `/opt/data/buzz-agents/enabled`.
+1. Mint a keypair, secret straight to the 0600 key file (never printed):
+   ```sh
+   P=<profile>
+   docker exec "$RC" /usr/local/bin/buzz-admin generate-key > /tmp/gk 2>&1
+   PUB=$(awk '/Public key:/{print $NF}' /tmp/gk)
+   awk '/Secret key:/{print $NF}' /tmp/gk \
+     | docker exec -i "$HC" sh -c "cat > /opt/data/buzz-agents/$P.key && chmod 600 /opt/data/buzz-agents/$P.key"
+   rm -f /tmp/gk; echo "pubkey $PUB"
+   ```
+   (`RC=buzz-relay-1`, `HC=hermes-agent-7qpk-hermes-agent-1`.) Also copy the secret into the password manager — `docker exec "$HC" cat /opt/data/buzz-agents/$P.key`.
+2. `docker exec "$RC" /usr/local/bin/buzz-admin add-member --pubkey "$PUB" --role member`
+3. `docker exec "$HC" sh -c "sed 's|-p,PROFILE,acp|-p,$P,acp|' /opt/data/buzz-agents-staging/buzz-agent-env.example > /opt/data/buzz-agents/$P.env && chmod 600 /opt/data/buzz-agents/$P.env"` — the `.env` carries no secret.
+4. Add `<profile>` on its own line to `/opt/data/buzz-agents/enabled`.
 6. `docker exec hermes-agent-7qpk-hermes-agent-1 /opt/data/buzz-agents/supervise.sh --once` (cron does it within a minute anyway).
 7. In the desktop app: give the agent a display name (`Hermes · <profile>`) and add it to the channels it should see. `buzz-acp` auto-subscribes on the membership event.
 

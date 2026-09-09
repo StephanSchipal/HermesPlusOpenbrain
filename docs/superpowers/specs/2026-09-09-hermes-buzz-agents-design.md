@@ -188,9 +188,11 @@ All under `/opt/data` so a Hermes image update cannot remove it:
     buzz.real                        # the real buzz CLI (same pinned commit)
   buzz-agents/
     enabled                          # newline list of profile names to run  (the "launch N of 7" knob)
-    <profile>.key                    # chmod 600 — the agent's Nostr key (hex), read by the buzz wrapper
-    <profile>.env                    # chmod 600 — BUZZ_PRIVATE_KEY (also, for buzz-acp itself),
-                                      #   BUZZ_RELAY_URL, BUZZ_ACP_AGENT_COMMAND=hermes,
+    <profile>.key                    # chmod 600 — the agent's Nostr secret (hex). SINGLE source of
+                                      #   truth: the supervisor reads it -> BUZZ_PRIVATE_KEY for
+                                      #   buzz-acp; the reply wrapper reads the same file.
+    <profile>.env                    # chmod 600 — NON-secret config: BUZZ_RELAY_URL,
+                                      #   BUZZ_ACP_AGENT_COMMAND=hermes,
                                       #   BUZZ_ACP_AGENT_ARGS=-p,<profile>,acp,
                                       #   BUZZ_ACP_PERMISSION_MODE=dont-ask (intent only),
                                       #   BUZZ_ACP_RESPOND_TO=owner-only,
@@ -233,10 +235,13 @@ or not. The implementer confirms the exact marker with a one-line probe
 ### 3.4 Identity & roster
 
 - One keypair per agent (`buzz-admin generate-key`). Secret (hex) → the owner's
-  password manager (one entry per agent, e.g. "Buzz agent — hermes/coder"),
-  `/opt/data/buzz-agents/<profile>.env` as `BUZZ_PRIVATE_KEY` (for buzz-acp's
-  own relay auth), **and** `/opt/data/buzz-agents/<profile>.key` as the bare hex
-  (for the reply wrapper). All chmod 600, never committed.
+  password manager (one entry per agent, e.g. "Buzz agent — hermes/coder") and
+  `/opt/data/buzz-agents/<profile>.key` (bare hex, chmod 600, never committed) —
+  the single on-disk copy. The supervisor exports it as `BUZZ_PRIVATE_KEY` for
+  buzz-acp; the reply wrapper reads the same file. `<profile>.env` holds only
+  non-secret config.
+- `buzz-admin generate-key` prints the secret to stdout — capture it to the
+  0600 file directly / via stdin; never let it reach a shell transcript.
 - `buzz-admin add-member --pubkey <hex> --role member` per agent — one at a
   time, `sleep 1` between (roster is a single kind:13534 event).
 - Display name per agent: `Hermes · <profile>` (set via the Buzz CLI on first

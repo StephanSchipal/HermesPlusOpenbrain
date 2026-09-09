@@ -46,8 +46,17 @@ start_one() {
     log "no env for $name — skipping"
     return 0
   fi
+  if [ ! -s "$BUZZ_AGENT_DIR/$name.key" ]; then
+    log "no key for $name — skipping"
+    return 0
+  fi
   # shellcheck disable=SC1090
   ( set -a; . "$BUZZ_AGENT_DIR/$name.env"; set +a
+    # The secret lives only in <name>.key (0600). buzz-acp reads it as
+    # BUZZ_PRIVATE_KEY; keeping it out of <name>.env means the env file is safe
+    # to read/diff and the key has a single source of truth (the wrapper reads
+    # the same file).
+    BUZZ_PRIVATE_KEY="$(cat "$BUZZ_AGENT_DIR/$name.key")"; export BUZZ_PRIVATE_KEY
     BUZZ_AGENT_PROFILE="$name"; export BUZZ_AGENT_PROFILE
     exec "$BUZZ_ACP_BIN" >>"$LOGDIR/$name.log" 2>&1 ) &
   echo $! > "$pidf"
