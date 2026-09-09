@@ -18,7 +18,9 @@ mkdir -p "$TMP/agents" "$TMP/localbin"
 # stub buzz-acp: record profile marker + pid, then sleep
 cat > "$TMP/agents/buzz-acp" <<'EOF'
 #!/bin/sh
-echo "started profile=$BUZZ_AGENT_PROFILE key=$BUZZ_PRIVATE_KEY pid=$$" >> "$SUP_STARTED"
+fd9="no-proc"
+if [ -e /proc/$$/fd/9 ]; then fd9="HOLDS-FD9"; else [ -d /proc/$$/fd ] && fd9="no-fd9"; fi
+echo "started profile=$BUZZ_AGENT_PROFILE key=$BUZZ_PRIVATE_KEY fd9=$fd9 pid=$$" >> "$SUP_STARTED"
 exec sleep 300
 EOF
 chmod +x "$TMP/agents/buzz-acp"
@@ -40,6 +42,9 @@ run() {
 run; sleep 1
 grep -q 'profile=alpha key=alphakey ' "$SUP_STARTED" || { echo "FAIL: alpha not started / key not exported: $(cat "$SUP_STARTED")"; exit 1; }
 grep -q 'profile=bravo key=bravokey ' "$SUP_STARTED" || { echo "FAIL: bravo not started / key not exported"; exit 1; }
+# children must NOT inherit the supervisor's flock fd (an orphan holding it
+# would wedge every future sweep). Only asserted where /proc is available.
+grep -q 'fd9=HOLDS-FD9' "$SUP_STARTED" && { echo "FAIL: spawned buzz-acp inherited flock fd 9"; exit 1; }
 [ -x "$TMP/localbin/buzz" ] || { echo "FAIL: wrapper not installed"; exit 1; }
 [ "$(grep -c started "$SUP_STARTED")" = 2 ] || { echo "FAIL: expected exactly 2 starts, got $(grep -c started "$SUP_STARTED")"; exit 1; }
 

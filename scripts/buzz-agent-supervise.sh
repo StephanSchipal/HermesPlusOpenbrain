@@ -19,7 +19,9 @@ LOCK="$BUZZ_AGENT_DIR/.supervise.lock"
 
 mkdir -p "$BUZZ_AGENT_DIR" "$LOGDIR"
 
-# One supervisor at a time.
+# One supervisor at a time. NOTE: children spawned below MUST close fd 9
+# (`exec 9>&-`) or an orphaned buzz-acp keeps the flock held and every later
+# sweep silently no-ops.
 exec 9>"$LOCK"
 if command -v flock >/dev/null 2>&1; then flock -n 9 || exit 0; fi
 
@@ -59,6 +61,8 @@ start_one() {
     # the same file).
     BUZZ_PRIVATE_KEY="$(cat "$BUZZ_AGENT_DIR/$name.key")"; export BUZZ_PRIVATE_KEY
     BUZZ_AGENT_PROFILE="$name"; export BUZZ_AGENT_PROFILE
+    exec 9>&-   # do NOT inherit the supervisor's flock — an orphaned buzz-acp
+                # would otherwise hold it and wedge every future sweep
     exec "$BUZZ_ACP_BIN" >>"$LOGDIR/$name.log" 2>&1 ) &
   echo $! > "$pidf"
   log "started $name pid $!"
