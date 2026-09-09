@@ -1,0 +1,28 @@
+# Copy to /opt/data/buzz-agents/<profile>.env on the VPS, chmod 600. One per agent.
+# The SECRET is NOT in this file — it lives only in /opt/data/buzz-agents/<profile>.key
+# (bare hex, chmod 600). The supervisor reads that file and exports
+# BUZZ_PRIVATE_KEY for buzz-acp; the reply wrapper reads the same file.
+# This file is non-secret config; still chmod 600 for tidiness.
+
+# --- relay ---
+BUZZ_RELAY_URL=wss://buzz.srv1608402.hstgr.cloud
+
+# --- which Hermes profile this agent is ---
+BUZZ_ACP_AGENT_COMMAND=hermes
+# Replace PROFILE with the profile name, e.g. -p,openbrain,acp
+BUZZ_ACP_AGENT_ARGS=-p,PROFILE,acp
+
+# --- capability gate (v1) ---
+# owner-only is the ONLY gate that holds. dont-ask is recorded for intent, but
+# Hermes ACP ignores session/set_config_option so it is a no-op (see the spike
+# note). Do NOT loosen BUZZ_ACP_RESPOND_TO without the phase-2 approval bridge.
+BUZZ_ACP_PERMISSION_MODE=dont-ask
+BUZZ_ACP_RESPOND_TO=owner-only
+BUZZ_ACP_AGENT_OWNER=f978cb6960678ad53d9c6ea9d9e0fc9510c494e67041d36a5e9d2da719556aa6
+BUZZ_ACP_AGENTS=1
+
+# --- turn caps ---
+# IDLE_TIMEOUT MUST be < MAX_TURN_DURATION or buzz-acp refuses to start.
+BUZZ_ACP_IDLE_TIMEOUT=180
+BUZZ_ACP_MAX_TURN_DURATION=900
+BUZZ_ACP_MAX_TURNS_PER_SESSION=8

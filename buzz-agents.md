@@ -1,0 +1,160 @@
+# Hermes agents in Buzz
+
+**Status: v1 LIVE since 2026-09-09.**
+
+Bridges Hermes profiles into the live Buzz relay ([`buzz.md`](buzz.md)) as
+member identities, via `buzz-acp` → `hermes -p <profile> acp`.
+
+- Design: [`docs/superpowers/specs/2026-09-09-hermes-buzz-agents-design.md`](docs/superpowers/specs/2026-09-09-hermes-buzz-agents-design.md)
+- Spike findings: [`docs/superpowers/notes/2026-09-09-hermes-buzz-agents-spike.md`](docs/superpowers/notes/2026-09-09-hermes-buzz-agents-spike.md)
+- Plan: [`docs/superpowers/plans/2026-09-09-hermes-buzz-agents.md`](docs/superpowers/plans/2026-09-09-hermes-buzz-agents.md)
+
+## As deployed (2026-09-09)
+
+| Profile | Buzz display name | pubkey (hex) | model |
+| --- | --- | --- | --- |
+| `default` | **`Hermes`** | `3164087055f1f9a4a38ab834073e9155e3c3b41ed8ae31e2ee0f7deadf7e7a2b` | claude-sonnet-5 |
+| `openbrain` | **`Hermes-openbrain`** | `dacaf9735c2b0379b99f5f98602c3454acde93006feaa7da0e92bd6dfaa61481` | moonshotai/kimi-k3 |
+
+Naming: the `default` agent is just **`Hermes`**; every other profile is
+`Hermes-<profile>`. (`default` was renamed off `Hermes-default` to avoid a
+collision with a leftover spike identity still listed as a `#hermes` member —
+harmless, the Buzz desktop's member-remove menu is currently unclickable for
+that row.)
+
+- Channel: `#hermes` = `aea9fa66-34f9-46fd-a6dd-4dbc2a95c776`.
+- `buzz-acp` sha256 `5b98ce62889ebab194e83427cd319ec8ad39a30d51ab4f01d4e33d8e0f763a93`,
+  `buzz.real` sha256 `c3686bee82bccf9117126909583af3788fc0f855c7a5f661686870e66e4a1362`
+  — both `block/buzz@3c7f288`, musl-static.
+- Host crontab: `* * * * * /root/HermesPlusOpenbrain/scripts/buzz-agents-watchdog.sh`.
+- Verified: owner @mentions `@Hermes` and `@Hermes-openbrain` in `#hermes`, each
+  replies from its own identity with its own toolset — `default` did a real
+  `laptop_fs` check, `openbrain` a real `openbrain stats` (133 captures).
+
+**Known limitation:** a mention that arrives during the ~40 s window when the
+Hermes container is restarting (e.g. the `laptop_fs` watchdog's `docker restart`
+after the laptop reconnects) is missed — buzz-acp does not replay it on
+recovery. Re-mention and it answers. Acceptable for v1.
+
+## What runs
+
+- `/opt/data/bin/buzz-acp` + `/opt/data/bin/buzz.real` — built from
+  `block/buzz@3c7f288` (musl-static). `/opt/data/bin/buzz-acp.version` records
+  the commit, build date, and sha256.
+- `/opt/data/buzz-agents/<profile>.key` (chmod 600) — the bare hex secret.
+  **Single source of truth.** The supervisor reads it and exports
+  `BUZZ_PRIVATE_KEY` for `buzz-acp`; the reply wrapper reads the same file.
+- `/opt/data/buzz-agents/<profile>.env` (chmod 600) — non-secret `buzz-acp`
+  config (relay URL, profile selector, gate, turn caps).
+- `/opt/data/buzz-agents/enabled` — newline list of profile names to run. **The
+  "launch N of 7" knob.** Blank lines and `#`-prefixed lines are ignored.
+- `/opt/data/buzz-agents/supervise.sh` — copy of
+  `scripts/buzz-agent-supervise.sh`. One `buzz-acp` per enabled name; also
+  reinstalls the wrapper.
+- `/opt/data/buzz-agents/buzz-wrap.sh` → `/usr/local/bin/buzz` — the reply
+  wrapper. `/usr/local/bin` is **not** a Docker volume; the host watchdog
+  reinstalls it every minute.
+- `scripts/buzz-agents-watchdog.sh` — **host** script, run every minute from the
+  host crontab (`* * * * * /root/HermesPlusOpenbrain/scripts/buzz-agents-watchdog.sh`).
+  The container is s6-managed with no crontab of its own, so liveness lives on
+  the host — same pattern as `/root/hermes-laptop-fs-watchdog.sh`. It reinstalls
+  the wrapper (as root) then runs `supervise.sh --once` (as `hermes`).
+- Logs: `/opt/data/buzz-agents/<profile>.log`, `supervise.log`;
+  `/var/log/buzz-agents-watchdog.log` on the host.
+
+`buzz-acp` and its `hermes acp` children run as `hermes`; `/opt/data/buzz-agents/`
+is `hermes`-owned. Everything under `/opt/data` survives a Hermes image update;
+the wrapper at `/usr/local/bin/buzz` does not — the watchdog puts it back within
+a minute, before any turn can complete.
+
+## Why the wrapper
+
+`buzz-acp` does not post the agent's reply; the agent runs
+`buzz messages send --channel <uuid> --content …` itself (the channel UUID is in
+the turn's `<context>`). Hermes's terminal sandbox strips every
+`BUZZ_`-prefixed env var, so the agent cannot get `BUZZ_PRIVATE_KEY` from the
+environment. `scripts/buzz-wrap.sh` reads the key from `<profile>.key` (0600)
+and injects it into `buzz.real` only. It picks the profile from
+`HERMES_PROFILE`, falling back to the basename of `HERMES_HOME` — both survive
+the sandbox.
+
+## Capability model (v1)
+
+**`--respond-to owner-only` is the entire trust boundary.** Only the owner
+(`f978cb69…`) can instruct an agent; everyone else in a channel sees the replies
+but cannot drive them.
+
+Agents otherwise run with **full Hermes capability** — shell, file edits,
+`openbrain save`, `laptop_fs`, the full MCP toolset. `--permission-mode dont-ask`
+is set in every env file to record intent, but Hermes ACP ignores it and the ACP
+path runs `HERMES_YOLO_MODE=1`. This is acceptable only because the owner already
+runs these same agents full-power on voice / WhatsApp / CLI — the Buzz surface
+is not a new principal. Opening `--respond-to` past `owner-only` requires the
+phase-2 approval bridge first.
+
+Code pushes to protected branches are refused by the relay without the owner's
+signed approval regardless of agent capability — configure branch protection on
+any repo an agent can touch.
+
+## Add an agent
+
+1. Mint a keypair, secret straight to the 0600 key file (never printed):
+   ```sh
+   P=<profile>
+   docker exec "$RC" /usr/local/bin/buzz-admin generate-key > /tmp/gk 2>&1
+   PUB=$(awk '/Public key:/{print $NF}' /tmp/gk)
+   awk '/Secret key:/{print $NF}' /tmp/gk \
+     | docker exec -i "$HC" sh -c "cat > /opt/data/buzz-agents/$P.key && chmod 600 /opt/data/buzz-agents/$P.key"
+   rm -f /tmp/gk; echo "pubkey $PUB"
+   ```
+   (`RC=buzz-relay-1`, `HC=hermes-agent-7qpk-hermes-agent-1`.) Also copy the secret into the password manager — `docker exec "$HC" cat /opt/data/buzz-agents/$P.key`.
+2. `docker exec "$RC" /usr/local/bin/buzz-admin add-member --pubkey "$PUB" --role member`
+3. `docker exec "$HC" sh -c "sed 's|-p,PROFILE,acp|-p,$P,acp|' /opt/data/buzz-agents-staging/buzz-agent-env.example > /opt/data/buzz-agents/$P.env && chmod 600 /opt/data/buzz-agents/$P.env"` — the `.env` carries no secret.
+4. Add `<profile>` on its own line to `/opt/data/buzz-agents/enabled`.
+6. `docker exec hermes-agent-7qpk-hermes-agent-1 /opt/data/buzz-agents/supervise.sh --once` (cron does it within a minute anyway).
+7. Set the display name via the CLI — `docker exec -e HERMES_PROFILE=<profile> "$HC" buzz users set-profile --name "Hermes-<profile>"` (the `default` agent is just `Hermes`). Then in the desktop app add it to the channels it should see; `buzz-acp` auto-subscribes on the membership event.
+
+## Remove / pause an agent
+
+Delete its line from `enabled`, then
+`kill $(cat /opt/data/buzz-agents/<profile>.pid)`.
+Full removal: also
+`docker exec buzz-relay-1 /usr/local/bin/buzz-admin remove-member --pubkey <hex>`
+and shred `<profile>.key` / `<profile>.env`.
+
+## Owner controls (in-channel, as owner)
+
+`!cancel` / `!rotate` / `!shutdown` — kind:9 message, exact body, agent
+mentioned via a separate `p`-tag.
+
+## Rebuild buzz-acp / buzz (new upstream commit)
+
+```bash
+cd /root/buzz-src && git fetch && git checkout <new-sha>
+rustup target add x86_64-unknown-linux-musl 2>/dev/null || true
+cargo build --release -p buzz-acp -p buzz-cli --target x86_64-unknown-linux-musl
+install -m755 target/x86_64-unknown-linux-musl/release/buzz-acp /docker/hermes-agent-7qpk/data/bin/buzz-acp
+install -m755 target/x86_64-unknown-linux-musl/release/buzz    /docker/hermes-agent-7qpk/data/bin/buzz.real
+# refresh /opt/data/bin/buzz-acp.version, then bounce the agents:
+for p in $(grep -v '^#' /opt/data/buzz-agents/enabled); do kill "$(cat /opt/data/buzz-agents/$p.pid)" 2>/dev/null; done
+# cron relaunches on the new binary within a minute
+```
+
+## After a Hermes image update — re-verify
+
+The agent config, supervisor, and wrapper source are all under `/opt/data` and
+survive. The host crontab survives (it's on the host). Only `/usr/local/bin/buzz`
+is lost, and the watchdog restores it within a minute.
+
+1. `docker exec hermes-agent-7qpk-hermes-agent-1 /opt/data/bin/buzz-acp --help | head -1` runs.
+2. `docker exec -u hermes -e HOME=/opt/data hermes-agent-7qpk-hermes-agent-1 /opt/hermes/.venv/bin/hermes -p default acp --check` still passes (the `-p` selector is unchanged).
+3. Within a minute: one `buzz-acp` per enabled agent (`docker exec … pgrep -af buzz-acp`) and `/usr/local/bin/buzz` is the wrapper (`docker exec … head -3 /usr/local/bin/buzz`).
+4. `@mention` one agent as owner in `#hermes` → it replies from its own identity.
+
+## Phase 2
+
+Per-action approval bridge (gate the agent's tool calls / `buzz messages send`
+behind an owner `approve <id>` reply) · `--respond-to allowlist` when teammates
+join the relay · a locked-down read-only profile (needs buzz-as-MCP so replies
+don't require the terminal tool) · agents in more channels · agents that
+initiate rather than only reply.
