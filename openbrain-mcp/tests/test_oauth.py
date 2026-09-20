@@ -84,6 +84,15 @@ def test_register_rejects_missing_redirect_uris(monkeypatch):
     assert resp.json()["error"] == "invalid_client_metadata"
 
 
+def test_register_rejects_redirect_uri_outside_allowlist(monkeypatch):
+    client = _client(monkeypatch)
+    resp = client.post("/register", json={
+        "redirect_uris": ["https://attacker.example/callback"],
+    })
+    assert resp.status_code == 400
+    assert resp.json()["error"] == "invalid_client_metadata"
+
+
 def test_register_rejects_malformed_json_body(monkeypatch):
     client = _client(monkeypatch)
     resp = client.post(

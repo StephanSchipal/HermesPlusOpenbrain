@@ -15,6 +15,13 @@ _clients: dict[str, dict] = {}
 CODE_TTL_SECONDS = 60
 _auth_codes: dict[str, dict] = {}
 
+# The only legitimate caller of this OAuth shim is claude.ai; per Anthropic's
+# connector docs this callback URL is the same across all hosted Claude
+# surfaces (web, Desktop, mobile, Cowork). Pinning /register to it prevents
+# an unauthenticated caller from registering their own redirect_uri and
+# later phishing a code (and thus OPENBRAIN_TOKEN) via /authorize.
+ALLOWED_REDIRECT_URIS = {"https://claude.ai/api/mcp/auth_callback"}
+
 
 def _verify_pkce(code_verifier: str, code_challenge: str) -> bool:
     digest = hashlib.sha256(code_verifier.encode()).digest()
@@ -55,6 +62,8 @@ async def register(request: Request) -> JSONResponse:
     if not isinstance(redirect_uris, list) or not all(
         isinstance(uri, str) and uri for uri in redirect_uris
     ):
+        return JSONResponse({"error": "invalid_client_metadata"}, status_code=400)
+    if not set(redirect_uris) <= ALLOWED_REDIRECT_URIS:
         return JSONResponse({"error": "invalid_client_metadata"}, status_code=400)
     client_id = secrets.token_urlsafe(24)
     _clients[client_id] = {"redirect_uris": redirect_uris, "created_at": time.time()}
