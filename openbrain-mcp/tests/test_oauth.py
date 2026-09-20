@@ -123,6 +123,22 @@ def test_register_rejects_non_object_json_body(monkeypatch, payload):
     assert resp.json()["error"] == "invalid_client_metadata"
 
 
+def test_register_rejects_past_max_registered_clients(monkeypatch):
+    monkeypatch.setattr(oauth_module, "MAX_REGISTERED_CLIENTS", 2)
+    client = _client(monkeypatch)
+    for _ in range(2):
+        resp = client.post("/register", json={
+            "redirect_uris": ["https://claude.ai/api/mcp/auth_callback"],
+        })
+        assert resp.status_code == 200
+
+    resp = client.post("/register", json={
+        "redirect_uris": ["https://claude.ai/api/mcp/auth_callback"],
+    })
+    assert resp.status_code == 429
+    assert resp.json()["error"] == "temporarily_unavailable"
+
+
 def _pkce_pair() -> tuple[str, str]:
     """Returns (code_verifier, code_challenge) for a valid S256 PKCE pair."""
     verifier = secrets.token_urlsafe(32)

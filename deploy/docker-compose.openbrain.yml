@@ -65,7 +65,17 @@ services:
       - "traefik.http.routers.openbrain-authorize.entrypoints=websecure"
       - "traefik.http.routers.openbrain-authorize.tls.certresolver=letsencrypt"
       - "traefik.http.routers.openbrain-authorize.priority=100"
-      - "traefik.http.routers.openbrain-authorize.middlewares=openbrain-gui-auth"
+      # Same credentials as the GUI's basic-auth, but defined on THIS
+      # service rather than referencing openbrain-gui's "openbrain-gui-auth"
+      # middleware by name. Referencing a middleware defined on a different
+      # container means Traefik drops this router entirely (silently
+      # falling through to the unprotected `openbrain` router above) if
+      # openbrain-gui is ever stopped/rebuilt independently -- exactly the
+      # kind of fail-open behavior this router exists to prevent. Defining
+      # it locally makes /authorize's protection depend only on this
+      # container's own lifecycle.
+      - "traefik.http.middlewares.openbrain-authorize-auth.basicauth.users=${GUI_BASIC_AUTH_USERS}"
+      - "traefik.http.routers.openbrain-authorize.middlewares=openbrain-authorize-auth"
       - "traefik.http.routers.openbrain-authorize.service=openbrain"
     healthcheck:
       test: ["CMD-SHELL", "python -c \"import urllib.request;urllib.request.urlopen('http://localhost:8080/health')\""]

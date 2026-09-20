@@ -165,6 +165,17 @@ never hand a code to infrastructure the attacker controls. No consent
 screen or other mitigation is needed on top of this for the current
 single-client (claude.ai only) scope.
 
+**`MAX_REGISTERED_CLIENTS` cap (added after a whole-branch review, same
+reasoning as the allowlist above):** the redirect_uri allowlist stops a
+registered client from being *useful* to an attacker, but `/register` is
+still unauthenticated and `_clients` is still an unbounded, in-memory dict —
+nothing stops repeated calls from growing it indefinitely, a memory-
+exhaustion DoS against the whole `openbrain-mcp` process (which also serves
+`/mcp` for every other client, not just the OAuth path). `register()` now
+rejects past 1000 entries with `429 {"error": "temporarily_unavailable"}` —
+a hard backstop, not a rate limit; a single legitimate client re-registers
+at most a handful of times.
+
 **`GET /authorize`** — reachable only through the new Traefik-gated router
 (§4.3). Validates `client_id` and that `redirect_uri` is one the client
 registered, requires `code_challenge` + `code_challenge_method=S256`, issues
@@ -198,15 +209,30 @@ async def authorize(request: Request) -> RedirectResponse | JSONResponse:
 
 ```python
 async def token(request: Request) -> JSONResponse:
-    form = await request.form()
-    code = form.get("code", "")
+    try:
+        form = await request.form()
+    except Exception:
+        return JSONResponse({"error": "invalid_grant"}, status_code=400)
+
+    code = form.get("code")
+    client_id = form.get("client_id")
+    code_verifier = form.get("code_verifier")
+    grant_type = form.get("grant_type")
+    redirect_uri = form.get("redirect_uri")
+
+    if not all(isinstance(v, str) for v in (code, client_id, code_verifier, redirect_uri)):
+        return JSONResponse({"error": "invalid_grant"}, status_code=400)
+    if grant_type != "authorization_code":
+        return JSONResponse({"error": "invalid_grant"}, status_code=400)
+
     entry = _auth_codes.pop(code, None)   # single-use: pop, not get
     if not entry or entry["expires_at"] < time.time():
         return JSONResponse({"error": "invalid_grant"}, status_code=400)
-    if entry["client_id"] != form.get("client_id"):
+    if entry["client_id"] != client_id:
         return JSONResponse({"error": "invalid_grant"}, status_code=400)
-    verifier = form.get("code_verifier", "")
-    if not _verify_pkce(verifier, entry["code_challenge"]):
+    if entry["redirect_uri"] != redirect_uri:
+        return JSONResponse({"error": "invalid_grant"}, status_code=400)
+    if not _verify_pkce(code_verifier, entry["code_challenge"]):
         return JSONResponse({"error": "invalid_grant"}, status_code=400)
     return JSONResponse({
         "access_token": OPENBRAIN_TOKEN,
@@ -216,6 +242,22 @@ async def token(request: Request) -> JSONResponse:
 
 (No `expires_in` field → per RFC 6749, the client should treat the token as
 not expiring. No `refresh_token`.)
+
+**Hardened after a code-quality review during implementation (not part of
+the original brainstorm):** the first version of this handler read `code`
+via `form.get("code", "")` and called `_auth_codes.pop(...)` immediately,
+before validating anything else. Two problems: (1) `await request.form()`
+was unguarded, so a malformed multipart body (bad boundary, or a field like
+`code_verifier` submitted as a file rather than plain text) raised an
+unhandled exception — a 500 instead of `invalid_grant` — and since this pop
+happened first, such a request could permanently destroy a real, still-valid
+one-time code before ever finishing validation, denying the legitimate
+client mid-flow. (2) Per RFC 6749 §4.1.3, the token request must also
+include `grant_type=authorization_code` and, since `/authorize` always
+requires and stores a `redirect_uri`, the token request's `redirect_uri`
+must match it — neither was checked. The fixed version above type-checks
+every field and validates `grant_type` *before* touching `_auth_codes`, and
+checks `redirect_uri` against the value captured at `/authorize` time.
 
 ### 4.2 Changes to `server.py`
 
@@ -311,15 +353,25 @@ labels:
   - "traefik.http.routers.openbrain-authorize.entrypoints=websecure"
   - "traefik.http.routers.openbrain-authorize.tls.certresolver=letsencrypt"
   - "traefik.http.routers.openbrain-authorize.priority=100"
-  - "traefik.http.routers.openbrain-authorize.middlewares=openbrain-gui-auth"
+  - "traefik.http.middlewares.openbrain-authorize-auth.basicauth.users=${GUI_BASIC_AUTH_USERS}"
+  - "traefik.http.routers.openbrain-authorize.middlewares=openbrain-authorize-auth"
   - "traefik.http.routers.openbrain-authorize.service=openbrain"
 ```
 
-(`openbrain-gui-auth` is the basic-auth middleware already defined by the
-`openbrain-gui` service's labels in the same file — Traefik middlewares and
-services are referenced by name across routers in the same provider, so the
-new router points at the *existing* `openbrain` service instead of declaring
-a duplicate one.
+(Same `GUI_BASIC_AUTH_USERS` credentials as the GUI, but the basicauth
+middleware is defined here on `openbrain-mcp`'s own labels
+(`openbrain-authorize-auth`), not by referencing `openbrain-gui`'s
+`openbrain-gui-auth` middleware by name — **added after a whole-branch
+review, not part of the original brainstorm**: Traefik's Docker provider
+resolves a middleware from whichever container's labels define it, and if
+that container (`openbrain-gui`) is ever stopped or rebuilt independently,
+Traefik drops any router referencing its now-undefined middleware —
+including `openbrain-authorize`, falling through to the unprotected plain
+`openbrain` router. Defining the middleware on `openbrain-mcp` itself makes
+`/authorize`'s protection depend only on this container's own lifecycle.
+The new router still points at the *existing* `openbrain` service rather
+than declaring a duplicate one — Traefik services are referenced by name
+across routers in the same provider independently of middlewares.
 
 **Both routers need an explicit `priority` (added after a review-driven fix
 during implementation, not part of the original brainstorm):** Traefik
@@ -438,7 +490,8 @@ data — then confirm Claude Code/Desktop and the GUI still work unchanged.
    `WWW-Authenticate` header) and wire the five new routes into `build_app()`;
    test 12.
 4. Update `deploy/docker-compose.openbrain.yml` (`OPENBRAIN_HOST` env var
-   passthrough, new `/authorize` router + label reusing `openbrain-gui-auth`).
+   passthrough, new `/authorize` router with its own basic-auth middleware
+   using the same `GUI_BASIC_AUTH_USERS` credentials as the GUI).
 5. Deploy to the VPS, run the manual smoke test above.
 6. Update `README.md`'s OpenBrain section with a short note on the new OAuth
    path for personal claude.ai connectors, alongside the existing Claude

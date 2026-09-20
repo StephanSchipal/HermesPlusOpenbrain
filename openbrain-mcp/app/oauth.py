@@ -10,6 +10,13 @@ from starlette.responses import JSONResponse, RedirectResponse
 
 from app.config import OPENBRAIN_HOST, OPENBRAIN_TOKEN
 
+# /register is unauthenticated by design (DCR requires it -- a client hasn't
+# obtained a token yet). Without a cap, repeated calls grow _clients forever,
+# a memory-exhaustion DoS against the whole process (which also serves
+# /mcp for every other client). This is not a rate limit -- it's a hard
+# backstop far above any real usage (a single legitimate client re-registers
+# at most a handful of times).
+MAX_REGISTERED_CLIENTS = 1000
 _clients: dict[str, dict] = {}
 
 CODE_TTL_SECONDS = 60
@@ -65,6 +72,8 @@ async def register(request: Request) -> JSONResponse:
         return JSONResponse({"error": "invalid_client_metadata"}, status_code=400)
     if not set(redirect_uris) <= ALLOWED_REDIRECT_URIS:
         return JSONResponse({"error": "invalid_client_metadata"}, status_code=400)
+    if len(_clients) >= MAX_REGISTERED_CLIENTS:
+        return JSONResponse({"error": "temporarily_unavailable"}, status_code=429)
     client_id = secrets.token_urlsafe(24)
     _clients[client_id] = {"redirect_uris": redirect_uris, "created_at": time.time()}
     return JSONResponse({

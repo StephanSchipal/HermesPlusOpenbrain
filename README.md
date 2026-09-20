@@ -304,7 +304,8 @@ environment variable referenced as `${AUTH_HEADER}` inside a space-free header a
 BOM that Desktop's JSON parser rejects) also had to be fixed by writing the config file with
 `[System.IO.File]::WriteAllText(...)` instead. Full writeup in the plan's Task 6.1 resolution note.
 
-**claude.ai personal connector (web + mobile), done (2026-09-20).** Unlike Claude Code/Desktop,
+**claude.ai personal connector (web + mobile), implemented 2026-09-20, pending deploy verification.**
+Unlike Claude Code/Desktop,
 claude.ai's personal "Add custom connector" dialog has no field for a raw bearer token — only a
 Server URL and optional OAuth Client ID/Secret. `openbrain-mcp` now also runs a minimal OAuth 2.0
 authorization server (RFC 7591 Dynamic Client Registration + PKCE) alongside its existing bearer-

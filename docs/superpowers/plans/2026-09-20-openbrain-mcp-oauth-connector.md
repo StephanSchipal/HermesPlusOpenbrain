@@ -868,7 +868,14 @@ Replace with:
       - "traefik.http.routers.openbrain-authorize.entrypoints=websecure"
       - "traefik.http.routers.openbrain-authorize.tls.certresolver=letsencrypt"
       - "traefik.http.routers.openbrain-authorize.priority=100"
-      - "traefik.http.routers.openbrain-authorize.middlewares=openbrain-gui-auth"
+      # Defined on THIS service's own labels, not by referencing
+      # openbrain-gui's "openbrain-gui-auth" middleware by name -- a
+      # whole-branch review found that referencing another container's
+      # middleware means Traefik drops this router (fails open to the
+      # unprotected plain router) if that container is ever stopped or
+      # rebuilt independently.
+      - "traefik.http.middlewares.openbrain-authorize-auth.basicauth.users=${GUI_BASIC_AUTH_USERS}"
+      - "traefik.http.routers.openbrain-authorize.middlewares=openbrain-authorize-auth"
       - "traefik.http.routers.openbrain-authorize.service=openbrain"
 ```
 

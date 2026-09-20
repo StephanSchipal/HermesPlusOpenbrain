@@ -157,13 +157,14 @@ def list_keywords() -> list[dict]:
         return store.list_keywords(conn)
 
 class BearerAuthMiddleware(BaseHTTPMiddleware):
-    # /authorize is meant to be gated one layer further out, by Traefik
-    # basic-auth on that path -- but that router doesn't exist yet (it lands
-    # in a later deploy task; check deploy/docker-compose.openbrain.yml for
-    # an "openbrain-authorize" router before assuming it's live). Until then
-    # this exemption alone leaves /authorize reachable with no auth at all,
-    # mitigated only by /register's redirect_uri allowlist + mandatory PKCE
-    # (see app/oauth.py) -- not a substitute for the Traefik gate.
+    # /authorize is gated one layer further out, by an "openbrain-authorize"
+    # Traefik router with basic-auth (see deploy/docker-compose.openbrain.yml)
+    # -- that's why it needs no bearer token here. This app-level exemption
+    # is not itself a security boundary for /authorize; it only holds because
+    # Traefik's router is in place, gating everything before it reaches this
+    # process. /register's redirect_uri allowlist + mandatory PKCE (see
+    # app/oauth.py) are defense-in-depth on top of that, not a substitute
+    # for it.
     # The rest are pre-auth OAuth endpoints a client hasn't obtained a token
     # from yet, plus the pre-existing /health exemption.
     EXEMPT_PATHS = {
