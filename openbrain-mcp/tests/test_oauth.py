@@ -95,3 +95,11 @@ def test_register_rejects_redirect_uris_as_bare_string(monkeypatch):
     })
     assert resp.status_code == 400
     assert resp.json()["error"] == "invalid_client_metadata"
+
+
+@pytest.mark.parametrize("payload", [b"[]", b'"hello"', b"42", b"null"])
+def test_register_rejects_non_object_json_body(monkeypatch, payload):
+    client = _client(monkeypatch)
+    resp = client.post("/register", content=payload, headers={"content-type": "application/json"})
+    assert resp.status_code == 400
+    assert resp.json()["error"] == "invalid_client_metadata"
