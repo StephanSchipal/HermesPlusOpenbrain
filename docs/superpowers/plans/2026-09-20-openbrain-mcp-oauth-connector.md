@@ -900,7 +900,7 @@ git commit -m "feat(oauth): add Traefik router gating /authorize behind the GUI'
 **Files:**
 - Modify: `README.md`
 
-- [ ] **Step 1: Add a new subsection after the existing Claude Desktop paragraph**
+- [x] **Step 1: Add a new subsection after the existing Claude Desktop paragraph**
 
 In `README.md`, find this paragraph (end of "## Phase 6 — Laptop clients"):
 
@@ -930,12 +930,14 @@ not a parallel credential system. Design/implementation details:
 ## Using it
 ```
 
-- [ ] **Step 2: Commit**
+- [x] **Step 2: Commit**
 
 ```bash
 git add README.md
 git commit -m "docs: document the claude.ai personal connector OAuth path"
 ```
+
+**Done:** `00ef6f4`
 
 ---
 
