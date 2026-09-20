@@ -2,6 +2,7 @@
 import base64
 import hashlib
 import secrets
+import time
 
 import pytest
 from starlette.applications import Starlette
@@ -31,6 +32,7 @@ def _oauth_test_app() -> Starlette:
               oauth_module.well_known_protected_resource, methods=["GET"]),
         Route("/register", oauth_module.register, methods=["POST"]),
         Route("/authorize", oauth_module.authorize, methods=["GET"]),
+        Route("/token", oauth_module.token, methods=["POST"]),
     ])
 
 
@@ -193,3 +195,118 @@ def test_authorize_rejects_missing_pkce(monkeypatch):
     })
     assert resp.status_code == 400
     assert resp.json()["error"] == "invalid_request"
+
+
+from urllib.parse import parse_qs, urlsplit
+
+
+def _get_auth_code(client: TestClient, client_id: str, code_verifier_challenge: tuple[str, str]) -> str:
+    _verifier, challenge = code_verifier_challenge
+    resp = client.get("/authorize", params={
+        "client_id": client_id,
+        "redirect_uri": REDIRECT_URI,
+        "code_challenge": challenge,
+        "code_challenge_method": "S256",
+    }, follow_redirects=False)
+    location = resp.headers["location"]
+    query = parse_qs(urlsplit(location).query)
+    return query["code"][0]
+
+
+def test_full_authorize_token_flow_with_valid_pkce(monkeypatch):
+    monkeypatch.setattr(oauth_module, "OPENBRAIN_TOKEN", "the-real-secret-token")
+    client = _client(monkeypatch)
+    client_id = _register_client(client, REDIRECT_URI)
+    verifier, challenge = _pkce_pair()
+    code = _get_auth_code(client, client_id, (verifier, challenge))
+
+    resp = client.post("/token", data={
+        "grant_type": "authorization_code",
+        "code": code,
+        "client_id": client_id,
+        "code_verifier": verifier,
+    })
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["access_token"] == "the-real-secret-token"
+    assert body["token_type"] == "Bearer"
+    assert "expires_in" not in body
+    assert "refresh_token" not in body
+
+
+def test_token_rejects_expired_code(monkeypatch):
+    monkeypatch.setattr(oauth_module, "OPENBRAIN_TOKEN", "the-real-secret-token")
+    client = _client(monkeypatch)
+    client_id = _register_client(client, REDIRECT_URI)
+    verifier, challenge = _pkce_pair()
+    code = _get_auth_code(client, client_id, (verifier, challenge))
+    oauth_module._auth_codes[code]["expires_at"] = time.time() - 1  # force expiry
+
+    resp = client.post("/token", data={
+        "grant_type": "authorization_code",
+        "code": code,
+        "client_id": client_id,
+        "code_verifier": verifier,
+    })
+
+    assert resp.status_code == 400
+    assert resp.json()["error"] == "invalid_grant"
+
+
+def test_token_rejects_replayed_code(monkeypatch):
+    monkeypatch.setattr(oauth_module, "OPENBRAIN_TOKEN", "the-real-secret-token")
+    client = _client(monkeypatch)
+    client_id = _register_client(client, REDIRECT_URI)
+    verifier, challenge = _pkce_pair()
+    code = _get_auth_code(client, client_id, (verifier, challenge))
+    token_request = {
+        "grant_type": "authorization_code",
+        "code": code,
+        "client_id": client_id,
+        "code_verifier": verifier,
+    }
+
+    first = client.post("/token", data=token_request)
+    second = client.post("/token", data=token_request)
+
+    assert first.status_code == 200
+    assert second.status_code == 400
+    assert second.json()["error"] == "invalid_grant"
+
+
+def test_token_rejects_wrong_code_verifier(monkeypatch):
+    monkeypatch.setattr(oauth_module, "OPENBRAIN_TOKEN", "the-real-secret-token")
+    client = _client(monkeypatch)
+    client_id = _register_client(client, REDIRECT_URI)
+    verifier, challenge = _pkce_pair()
+    code = _get_auth_code(client, client_id, (verifier, challenge))
+
+    resp = client.post("/token", data={
+        "grant_type": "authorization_code",
+        "code": code,
+        "client_id": client_id,
+        "code_verifier": "wrong-verifier",
+    })
+
+    assert resp.status_code == 400
+    assert resp.json()["error"] == "invalid_grant"
+
+
+def test_token_rejects_client_id_mismatch(monkeypatch):
+    monkeypatch.setattr(oauth_module, "OPENBRAIN_TOKEN", "the-real-secret-token")
+    client = _client(monkeypatch)
+    client_id = _register_client(client, REDIRECT_URI)
+    other_client_id = _register_client(client, REDIRECT_URI)
+    verifier, challenge = _pkce_pair()
+    code = _get_auth_code(client, client_id, (verifier, challenge))
+
+    resp = client.post("/token", data={
+        "grant_type": "authorization_code",
+        "code": code,
+        "client_id": other_client_id,
+        "code_verifier": verifier,
+    })
+
+    assert resp.status_code == 400
+    assert resp.json()["error"] == "invalid_grant"

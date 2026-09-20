@@ -8,7 +8,7 @@ from urllib.parse import urlencode
 from starlette.requests import Request
 from starlette.responses import JSONResponse, RedirectResponse
 
-from app.config import OPENBRAIN_HOST
+from app.config import OPENBRAIN_HOST, OPENBRAIN_TOKEN
 
 _clients: dict[str, dict] = {}
 
@@ -98,3 +98,20 @@ async def authorize(request: Request):
     if q.get("state") is not None:
         params["state"] = q["state"]
     return RedirectResponse(f"{redirect_uri}?{urlencode(params)}", status_code=302)
+
+
+async def token(request: Request) -> JSONResponse:
+    form = await request.form()
+    code = form.get("code", "")
+    entry = _auth_codes.pop(code, None)   # pop, not get: makes the code single-use
+    if not entry or entry["expires_at"] < time.time():
+        return JSONResponse({"error": "invalid_grant"}, status_code=400)
+    if entry["client_id"] != form.get("client_id"):
+        return JSONResponse({"error": "invalid_grant"}, status_code=400)
+    verifier = form.get("code_verifier", "")
+    if not _verify_pkce(verifier, entry["code_challenge"]):
+        return JSONResponse({"error": "invalid_grant"}, status_code=400)
+    return JSONResponse({
+        "access_token": OPENBRAIN_TOKEN,
+        "token_type": "Bearer",
+    })
