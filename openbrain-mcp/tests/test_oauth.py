@@ -75,3 +75,23 @@ def test_register_rejects_missing_redirect_uris(monkeypatch):
     resp = client.post("/register", json={})
     assert resp.status_code == 400
     assert resp.json()["error"] == "invalid_client_metadata"
+
+
+def test_register_rejects_malformed_json_body(monkeypatch):
+    client = _client(monkeypatch)
+    resp = client.post(
+        "/register",
+        content="not-json",
+        headers={"content-type": "application/json"},
+    )
+    assert resp.status_code == 400
+    assert resp.json()["error"] == "invalid_client_metadata"
+
+
+def test_register_rejects_redirect_uris_as_bare_string(monkeypatch):
+    client = _client(monkeypatch)
+    resp = client.post("/register", json={
+        "redirect_uris": "https://claude.ai/api/mcp/auth_callback",
+    })
+    assert resp.status_code == 400
+    assert resp.json()["error"] == "invalid_client_metadata"

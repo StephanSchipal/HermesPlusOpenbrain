@@ -31,9 +31,18 @@ async def well_known_protected_resource(_request: Request) -> JSONResponse:
 
 
 async def register(request: Request) -> JSONResponse:
-    body = await request.json()
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "invalid_client_metadata"}, status_code=400)
+    if not isinstance(body, dict):
+        return JSONResponse({"error": "invalid_client_metadata"}, status_code=400)
     redirect_uris = body.get("redirect_uris") or []
     if not redirect_uris:
+        return JSONResponse({"error": "invalid_client_metadata"}, status_code=400)
+    if not isinstance(redirect_uris, list) or not all(
+        isinstance(uri, str) and uri for uri in redirect_uris
+    ):
         return JSONResponse({"error": "invalid_client_metadata"}, status_code=400)
     client_id = secrets.token_urlsafe(24)
     _clients[client_id] = {"redirect_uris": redirect_uris, "created_at": time.time()}
