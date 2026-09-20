@@ -24,6 +24,7 @@ services:
       DATABASE_URL: postgresql://openbrain:${POSTGRES_PASSWORD}@openbrain-db:5432/openbrain
       OPENBRAIN_TOKEN: ${OPENBRAIN_TOKEN}
       OPENBRAIN_TIMEZONE: ${OPENBRAIN_TIMEZONE:-UTC}
+      OPENBRAIN_HOST: ${OPENBRAIN_HOST}
     depends_on:
       openbrain-db:
         condition: service_healthy
@@ -38,6 +39,18 @@ services:
       - "traefik.http.services.openbrain.loadbalancer.server.port=8080"
       # No Traefik network membership needed: Traefik runs with network_mode: host
       # and already reaches container bridge IPs directly (confirmed in Task 0.3).
+      # /authorize is the one browser-facing OAuth step (see openbrain-mcp-oauth-
+      # connector-design.md) -- gated by the same basic-auth already protecting
+      # the GUI, reusing its middleware and this service (no separate service
+      # definition needed). Everything else on this host (/mcp, /token,
+      # /register, /.well-known/*) stays reachable without it -- those are
+      # machine-to-machine calls from Claude's backend, never a browser.
+      - "traefik.http.routers.openbrain-authorize.rule=Host(`${OPENBRAIN_HOST}`) && Path(`/authorize`)"
+      - "traefik.http.routers.openbrain-authorize.entrypoints=websecure"
+      - "traefik.http.routers.openbrain-authorize.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.openbrain-authorize.priority=10"
+      - "traefik.http.routers.openbrain-authorize.middlewares=openbrain-gui-auth"
+      - "traefik.http.routers.openbrain-authorize.service=openbrain"
     healthcheck:
       test: ["CMD-SHELL", "python -c \"import urllib.request;urllib.request.urlopen('http://localhost:8080/health')\""]
       interval: 30s
