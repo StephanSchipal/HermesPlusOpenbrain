@@ -168,7 +168,7 @@ git commit -m "feat(oauth): add OAuth metadata well-known endpoints"
 - Modify: `openbrain-mcp/app/oauth.py`
 - Modify: `openbrain-mcp/tests/test_oauth.py`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 In `tests/test_oauth.py`, update `_oauth_test_app()` to add the `/register` route, and add an autouse fixture that clears the module's in-memory client store between tests (it's a module-level dict, so state would otherwise leak across tests in the same process):
 
@@ -217,12 +217,12 @@ def test_register_rejects_missing_redirect_uris(monkeypatch):
     assert resp.json()["error"] == "invalid_client_metadata"
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `cd openbrain-mcp && python -m pytest tests/test_oauth.py -v`
 Expected: `FAILED ... AttributeError: module 'app.oauth' has no attribute 'register'` (and no `_clients` attribute either)
 
-- [ ] **Step 3: Add the client store and `register` handler to `app/oauth.py`**
+- [x] **Step 3: Add the client store and `register` handler to `app/oauth.py`**
 
 ```python
 # add these imports at the top of app/oauth.py
@@ -250,18 +250,20 @@ async def register(request: Request) -> JSONResponse:
     })
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `cd openbrain-mcp && python -m pytest tests/test_oauth.py -v`
 Expected: `4 passed`
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 cd openbrain-mcp
 git add app/oauth.py tests/test_oauth.py
 git commit -m "feat(oauth): add RFC 7591 dynamic client registration endpoint"
 ```
+
+**Done:** `2601246`, plus two review-driven follow-up commits: `3e60b48` (reject malformed body / non-list `redirect_uris`) and `50525b5` (test coverage for the non-object-JSON-body guard).
 
 ---
 
