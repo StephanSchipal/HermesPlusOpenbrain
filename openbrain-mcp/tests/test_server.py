@@ -48,6 +48,25 @@ def test_register_exempt_from_bearer_auth(monkeypatch):
     assert resp.status_code == 200
 
 
+def test_authorize_exempt_from_bearer_auth(monkeypatch):
+    # No Authorization header sent at all -- a 401 here would mean /authorize
+    # got dropped from EXEMPT_PATHS. The request is otherwise incomplete
+    # (unknown client_id, no PKCE params), so a 400 from oauth.py's own
+    # validation is the expected non-401 response, not a success.
+    client = _client(monkeypatch)
+    resp = client.get("/authorize", params={"client_id": "x", "redirect_uri": "y"})
+    assert resp.status_code != 401
+
+
+def test_token_exempt_from_bearer_auth(monkeypatch):
+    # Same reasoning as above: no Authorization header, incomplete body --
+    # asserting non-401 confirms the middleware exemption, independent of
+    # whatever /token's own validation does with a bad request.
+    client = _client(monkeypatch)
+    resp = client.post("/token", data={"grant_type": "authorization_code"})
+    assert resp.status_code != 401
+
+
 def test_mcp_401_includes_www_authenticate_header(monkeypatch):
     client = _client(monkeypatch)
     monkeypatch.setattr(server_module, "OPENBRAIN_HOST", "brain.test.example")
