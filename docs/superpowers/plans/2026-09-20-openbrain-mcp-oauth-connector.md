@@ -472,7 +472,7 @@ git commit -m "feat(oauth): add PKCE-protected /authorize endpoint"
 - Modify: `openbrain-mcp/app/oauth.py`
 - Modify: `openbrain-mcp/tests/test_oauth.py`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 In `tests/test_oauth.py`, add the `/token` route to `_oauth_test_app()`:
 
@@ -609,12 +609,12 @@ def test_token_rejects_client_id_mismatch(monkeypatch):
 
 Also add `import time` at the top of `tests/test_oauth.py` (used by the expired-code test).
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `cd openbrain-mcp && python -m pytest tests/test_oauth.py -v`
 Expected: `FAILED ... AttributeError: module 'app.oauth' has no attribute 'token'`
 
-- [ ] **Step 3: Add the `token` handler to `app/oauth.py`**
+- [x] **Step 3: Add the `token` handler to `app/oauth.py`**
 
 ```python
 # add after authorize()
@@ -641,18 +641,20 @@ This needs `OPENBRAIN_TOKEN` importable from `app.oauth` (so tests can `monkeypa
 from app.config import OPENBRAIN_HOST, OPENBRAIN_TOKEN
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `cd openbrain-mcp && python -m pytest tests/test_oauth.py -v`
 Expected: `13 passed`
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 cd openbrain-mcp
 git add app/oauth.py tests/test_oauth.py
 git commit -m "feat(oauth): add /token endpoint, completing the DCR+PKCE flow"
 ```
+
+**Done:** `6a8e963`, plus two review-driven follow-up commits: `cf3ce8c` (reject malformed/type-confused `/token` requests before consuming the code; add `grant_type`/`redirect_uri` checks) and `21f82dd` (defense-in-depth `redirect_uri` type check). The full register→authorize→token flow is now complete and tested end-to-end.
 
 ---
 
