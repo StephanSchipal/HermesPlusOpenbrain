@@ -2,6 +2,7 @@ import os
 
 DATABASE_URL = os.environ.get("DATABASE_URL", "")
 OPENBRAIN_TOKEN = os.environ.get("OPENBRAIN_TOKEN", "")
+OPENBRAIN_HOST = os.environ.get("OPENBRAIN_HOST", "")
 MODEL_NAME = os.environ.get("OPENBRAIN_MODEL", "intfloat/multilingual-e5-small")
 EMBED_DIM = 384
 # IANA timezone name search's date_from/date_to filters interpret "calendar
