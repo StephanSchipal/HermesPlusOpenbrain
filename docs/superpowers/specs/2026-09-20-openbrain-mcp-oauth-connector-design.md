@@ -302,6 +302,7 @@ labels:
   - "traefik.http.routers.openbrain.entrypoints=websecure"
   - "traefik.http.routers.openbrain.tls.certresolver=letsencrypt"
   - "traefik.http.services.openbrain.loadbalancer.server.port=8080"
+  - "traefik.http.routers.openbrain.priority=1"
   # Gate only the human-facing /authorize step with the same basic-auth
   # already protecting the GUI. Everything else on this host (/mcp, /token,
   # /register, /.well-known/*) stays reachable without it -- those are
@@ -309,7 +310,7 @@ labels:
   - "traefik.http.routers.openbrain-authorize.rule=Host(`${OPENBRAIN_HOST}`) && Path(`/authorize`)"
   - "traefik.http.routers.openbrain-authorize.entrypoints=websecure"
   - "traefik.http.routers.openbrain-authorize.tls.certresolver=letsencrypt"
-  - "traefik.http.routers.openbrain-authorize.priority=10"
+  - "traefik.http.routers.openbrain-authorize.priority=100"
   - "traefik.http.routers.openbrain-authorize.middlewares=openbrain-gui-auth"
   - "traefik.http.routers.openbrain-authorize.service=openbrain"
 ```
@@ -318,8 +319,21 @@ labels:
 `openbrain-gui` service's labels in the same file — Traefik middlewares and
 services are referenced by name across routers in the same provider, so the
 new router points at the *existing* `openbrain` service instead of declaring
-a duplicate one. `priority=10` ensures the path-specific router is evaluated
-before the plain `Host()`-only one for requests to `/authorize`.)
+a duplicate one.
+
+**Both routers need an explicit `priority` (added after a review-driven fix
+during implementation, not part of the original brainstorm):** Traefik
+compares priorities numerically regardless of whether a value is explicit or
+automatically computed from rule length, and it does not treat "more
+specific rule" as inherently higher-priority on its own. An earlier version
+of this design set only `openbrain-authorize`'s priority (`10`), leaving
+`openbrain` unset — but an unset priority isn't "low," it's automatically
+computed as that router's rule length in characters, commonly 35-45 for a
+real hostname. Since 35-45 > 10, the plain, unprotected `Host()`-only router
+would have silently outranked the basic-auth-gated one for every request to
+`/authorize`, defeating this section's entire purpose without any error or
+warning. Setting both explicitly (`100` vs. `1`) removes any dependency on
+hostname length or Traefik's automatic/explicit tie-breaking rules.)
 
 No new environment variables beyond passing through the existing
 `OPENBRAIN_HOST`, no new secrets, no new containers, no schema/DB changes.

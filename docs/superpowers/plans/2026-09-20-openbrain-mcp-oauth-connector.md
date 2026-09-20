@@ -794,7 +794,7 @@ git commit -m "feat(oauth): wire OAuth routes into the app, update bearer middle
 **Files:**
 - Modify: `deploy/docker-compose.openbrain.yml`
 
-- [ ] **Step 1: Add `OPENBRAIN_HOST` to the `openbrain-mcp` service's environment**
+- [x] **Step 1: Add `OPENBRAIN_HOST` to the `openbrain-mcp` service's environment**
 
 In `deploy/docker-compose.openbrain.yml`, find the `openbrain-mcp` service's `environment:` block:
 
@@ -821,7 +821,7 @@ Add the new line:
       OPENBRAIN_HOST: ${OPENBRAIN_HOST}
 ```
 
-- [ ] **Step 2: Add the `/authorize` Traefik router to the same service's `labels:`**
+- [x] **Step 2: Add the `/authorize` Traefik router to the same service's `labels:`**
 
 Find:
 
@@ -845,6 +845,7 @@ Replace with:
       - "traefik.http.routers.openbrain.entrypoints=websecure"
       - "traefik.http.routers.openbrain.tls.certresolver=letsencrypt"
       - "traefik.http.services.openbrain.loadbalancer.server.port=8080"
+      - "traefik.http.routers.openbrain.priority=1"
       # No Traefik network membership needed: Traefik runs with network_mode: host
       # and already reaches container bridge IPs directly (confirmed in Task 0.3).
       # /authorize is the one browser-facing OAuth step (see openbrain-mcp-oauth-
@@ -853,15 +854,25 @@ Replace with:
       # definition needed). Everything else on this host (/mcp, /token,
       # /register, /.well-known/*) stays reachable without it: those are
       # machine-to-machine calls from Claude's backend, never a browser.
+      #
+      # NOTE (found during Task 7 implementation, corrected in the spec and
+      # here): both routers need an EXPLICIT priority. Traefik compares
+      # priorities numerically whether they're explicit or automatically
+      # computed from rule length -- an earlier draft left `openbrain`
+      # unset and gave only `openbrain-authorize` a small explicit value
+      # (10), which is LOWER than `openbrain`'s automatic rule-length
+      # priority (35-45 for a real hostname), so the unprotected router
+      # would have silently won every /authorize request. 100 vs. 1 removes
+      # any dependency on hostname length or automatic/explicit tie-breaking.
       - "traefik.http.routers.openbrain-authorize.rule=Host(`${OPENBRAIN_HOST}`) && Path(`/authorize`)"
       - "traefik.http.routers.openbrain-authorize.entrypoints=websecure"
       - "traefik.http.routers.openbrain-authorize.tls.certresolver=letsencrypt"
-      - "traefik.http.routers.openbrain-authorize.priority=10"
+      - "traefik.http.routers.openbrain-authorize.priority=100"
       - "traefik.http.routers.openbrain-authorize.middlewares=openbrain-gui-auth"
       - "traefik.http.routers.openbrain-authorize.service=openbrain"
 ```
 
-- [ ] **Step 3: Validate the compose file parses correctly**
+- [x] **Step 3: Validate the compose file parses correctly**
 
 This step needs `.env` present (even with placeholder values) since compose interpolates `${OPENBRAIN_HOST}` etc. at parse time.
 
@@ -873,12 +884,14 @@ docker compose -f docker-compose.openbrain.yml config --quiet
 ```
 Expected: no output, exit code 0 (means the YAML + label interpolation is syntactically valid). If you created a throwaway `.env` just for this check and don't already have a real one on this machine, that's fine — this step only validates syntax, it doesn't deploy anything.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add deploy/docker-compose.openbrain.yml
 git commit -m "feat(oauth): add Traefik router gating /authorize behind the GUI's basic-auth"
 ```
+
+**Done:** `9d355c2`, plus review-driven follow-up `7c665ab` (fixed a real bug found during implementer self-review: the original `priority=10` on `openbrain-authorize` was actually LOWER than `openbrain`'s automatic rule-length priority, so the unprotected plain router would have silently won every `/authorize` request — verified against Traefik's own docs. Both routers now set explicit priorities, `100`/`1`). Design spec and this plan's Task 7 code block corrected to match.
 
 ---
 
