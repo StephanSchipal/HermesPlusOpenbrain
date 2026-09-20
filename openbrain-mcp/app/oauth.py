@@ -115,7 +115,7 @@ async def token(request: Request) -> JSONResponse:
     # Reject anything that isn't a plain string (e.g. an UploadFile from a
     # multipart file field) *before* touching _auth_codes, so a malformed
     # request can never pop and destroy a real, still-valid code.
-    if not isinstance(code, str) or not isinstance(client_id, str) or not isinstance(code_verifier, str):
+    if not all(isinstance(v, str) for v in (code, client_id, code_verifier, redirect_uri)):
         return JSONResponse({"error": "invalid_grant"}, status_code=400)
     if grant_type != "authorization_code":
         return JSONResponse({"error": "invalid_grant"}, status_code=400)

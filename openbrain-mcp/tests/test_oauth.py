@@ -399,6 +399,17 @@ def test_token_rejects_missing_or_wrong_grant_type(monkeypatch):
     assert resp_wrong.status_code == 400
     assert resp_wrong.json()["error"] == "invalid_grant"
 
+    # The wrong-grant_type attempt above must not have consumed the code --
+    # a follow-up well-formed request with the same code should still work.
+    resp_retry = client.post("/token", data={
+        "grant_type": "authorization_code",
+        "code": code_wrong,
+        "client_id": client_id,
+        "code_verifier": verifier,
+        "redirect_uri": REDIRECT_URI,
+    })
+    assert resp_retry.status_code == 200
+
 
 def test_token_rejects_mismatched_redirect_uri(monkeypatch):
     client = _client(monkeypatch)
