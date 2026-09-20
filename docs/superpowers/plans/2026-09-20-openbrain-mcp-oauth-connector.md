@@ -664,7 +664,7 @@ git commit -m "feat(oauth): add /token endpoint, completing the DCR+PKCE flow"
 - Modify: `openbrain-mcp/app/server.py`
 - Modify: `openbrain-mcp/tests/test_server.py`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Add to `tests/test_server.py` (after the existing tests):
 
@@ -694,12 +694,12 @@ def test_mcp_401_includes_www_authenticate_header(monkeypatch):
     )
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `cd openbrain-mcp && python -m pytest tests/test_server.py -v`
 Expected: the three new tests fail — the first two with 401 (routes not registered/still behind bearer auth), the third because `server_module.OPENBRAIN_HOST` doesn't exist and the header is missing.
 
-- [ ] **Step 3: Update `app/server.py`**
+- [x] **Step 3: Update `app/server.py`**
 
 Change the import line near the top:
 
@@ -772,18 +772,20 @@ def build_app() -> Starlette:
     return app
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `cd openbrain-mcp && python -m pytest tests/ -v`
 Expected: all tests pass, including the full pre-existing suite (no regressions) plus the 13 `test_oauth.py` tests and the 3 new `test_server.py` tests.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 cd openbrain-mcp
 git add app/server.py tests/test_server.py
 git commit -m "feat(oauth): wire OAuth routes into the app, update bearer middleware"
 ```
+
+**Done:** `99adcae`, plus review-driven follow-up `171c418` (corrected an inaccurate `/authorize` exemption comment — it claimed Traefik basic-auth already gates that path, which is only true after Task 7 — and added the two missing `/authorize`/`/token` exemption regression tests). Confirmed `/mcp` is not in `EXEMPT_PATHS` — every existing client (Hermes, Claude Code, Claude Desktop, GUI) is unaffected.
 
 ---
 
