@@ -117,16 +117,20 @@ already set in compose for Traefik's `Host()` rule):
 }
 ```
 
-**`POST /register`** (RFC 7591 DCR) — accepts any client metadata JSON body,
-requires only that `redirect_uris` is a non-empty list (this is the one
-piece of the request actually used later, at `/authorize`, to stop an
-attacker-supplied redirect):
+**`POST /register`** (RFC 7591 DCR) — accepts client metadata JSON, but
+**only accepts `redirect_uris` that are a subset of a hardcoded allowlist**
+containing the one real claude.ai callback URL
+(`https://claude.ai/api/mcp/auth_callback`, per Anthropic's connector docs —
+the same URI for all hosted Claude surfaces: web, Desktop, mobile, Cowork):
 
 ```python
+ALLOWED_REDIRECT_URIS = {"https://claude.ai/api/mcp/auth_callback"}
+
+
 async def register(request: Request) -> JSONResponse:
     body = await request.json()
     redirect_uris = body.get("redirect_uris") or []
-    if not redirect_uris:
+    if not redirect_uris or not set(redirect_uris) <= ALLOWED_REDIRECT_URIS:
         return JSONResponse({"error": "invalid_client_metadata"}, status_code=400)
     client_id = secrets.token_urlsafe(24)
     _clients[client_id] = {"redirect_uris": redirect_uris, "created_at": time.time()}
@@ -138,6 +142,28 @@ async def register(request: Request) -> JSONResponse:
         "response_types": ["code"],
     })
 ```
+
+**Why this allowlist exists (added after a code-quality review during
+implementation, not part of the original brainstorm):** `/register` is
+deliberately unauthenticated — that's required for DCR to work at all,
+since a client hasn't obtained a token yet. Without this allowlist, anyone
+could call `/register` with their *own* server as `redirect_uri`, then get
+Stephan to click a crafted `/authorize?client_id=<theirs>&redirect_uri=<theirs>&...`
+link. If his browser had a cached Traefik basic-auth session for this host
+(e.g. from recently using `openbrain-gui`), that request would complete
+*silently* — no visible prompt, since `/authorize` has no consent screen —
+and 302 a valid one-time code straight to the attacker's server. Once
+`/token` exists (§4.1 below), that code redeems for `OPENBRAIN_TOKEN`
+itself: the real, shared production secret used by Hermes, Claude Code,
+Claude Desktop, and the GUI. That's a materially bigger threat than the one
+this design originally scoped for (§3: "a stranger who discovers the
+hostname" — not "a stranger who gets one link clicked"). Pinning
+`/register` to the one real callback URL closes this completely: an
+attacker can still call `/register`, but the resulting client's `redirect_uri`
+can now only ever be claude.ai's own real callback, so `/authorize` can
+never hand a code to infrastructure the attacker controls. No consent
+screen or other mitigation is needed on top of this for the current
+single-client (claude.ai only) scope.
 
 **`GET /authorize`** — reachable only through the new Traefik-gated router
 (§4.3). Validates `client_id` and that `redirect_uri` is one the client
@@ -319,7 +345,7 @@ No new environment variables beyond passing through the existing
 
 | Condition | Response |
 |---|---|
-| `/register` missing/empty `redirect_uris` | `400 {"error": "invalid_client_metadata"}` |
+| `/register` missing/empty `redirect_uris`, or any `redirect_uris` entry outside `ALLOWED_REDIRECT_URIS` | `400 {"error": "invalid_client_metadata"}` |
 | `/authorize` unknown `client_id`, or `redirect_uri` not registered for it | `400 {"error": "invalid_client"}` |
 | `/authorize` missing/wrong PKCE method | `400 {"error": "invalid_request", ...}` |
 | `/token` unknown, expired, or already-used code | `400 {"error": "invalid_grant"}` (RFC 6749-compliant code — Claude's docs specifically call out needing this exact code, not a custom one, for its refresh/retry logic to behave) |
@@ -362,10 +388,13 @@ New tests in `openbrain-mcp/tests/test_oauth.py`:
    fields present, URLs built from `OPENBRAIN_HOST`.
 2. `test_well_known_protected_resource_metadata_shape` — RFC 9728 fields
    present, `resource` matches the `/mcp` URL.
-3. `test_register_returns_client_id_for_valid_metadata` — POST with
-   `redirect_uris` → 200, a `client_id`, and that client is later usable at
-   `/authorize`.
+3. `test_register_returns_client_id_for_valid_metadata` — POST with the
+   allowed `redirect_uris` → 200, a `client_id`, and that client is later
+   usable at `/authorize`.
 4. `test_register_rejects_missing_redirect_uris` → 400.
+4a. `test_register_rejects_redirect_uri_outside_allowlist` — POST with a
+   well-formed but non-allowlisted `redirect_uris` (e.g.
+   `https://attacker.example/callback`) → 400 `invalid_client_metadata`.
 5. `test_full_authorize_token_flow_with_valid_pkce` — register → authorize
    (valid PKCE challenge, matching registered redirect_uri) → follow the
    redirect's `code` → token → asserts `access_token == OPENBRAIN_TOKEN`.
