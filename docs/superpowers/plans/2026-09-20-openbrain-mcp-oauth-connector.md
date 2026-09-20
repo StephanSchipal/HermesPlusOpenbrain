@@ -263,7 +263,7 @@ git add app/oauth.py tests/test_oauth.py
 git commit -m "feat(oauth): add RFC 7591 dynamic client registration endpoint"
 ```
 
-**Done:** `2601246`, plus two review-driven follow-up commits: `3e60b48` (reject malformed body / non-list `redirect_uris`) and `50525b5` (test coverage for the non-object-JSON-body guard).
+**Done:** `2601246`, plus three review-driven follow-up commits: `3e60b48` (reject malformed body / non-list `redirect_uris`), `50525b5` (test coverage for the non-object-JSON-body guard), and `a504167` (pin `redirect_uris` to an allowlist of the real claude.ai callback URL — closes an open-redirect/token-theft gap found during Task 4's review; spec amended in `5df53b6`).
 
 ---
 
@@ -273,7 +273,7 @@ git commit -m "feat(oauth): add RFC 7591 dynamic client registration endpoint"
 - Modify: `openbrain-mcp/app/oauth.py`
 - Modify: `openbrain-mcp/tests/test_oauth.py`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 In `tests/test_oauth.py`:
 
@@ -384,12 +384,12 @@ def test_authorize_rejects_missing_pkce(monkeypatch):
     assert resp.json()["error"] == "invalid_request"
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `cd openbrain-mcp && python -m pytest tests/test_oauth.py -v`
 Expected: `FAILED ... AttributeError: module 'app.oauth' has no attribute 'authorize'` (and no `_auth_codes` attribute)
 
-- [ ] **Step 3: Add `_auth_codes`, the PKCE verifier, and the `authorize` handler to `app/oauth.py`**
+- [x] **Step 3: Add `_auth_codes`, the PKCE verifier, and the `authorize` handler to `app/oauth.py`**
 
 ```python
 # add these imports at the top of app/oauth.py
@@ -449,18 +449,20 @@ from starlette.responses import JSONResponse, RedirectResponse
 from app.config import OPENBRAIN_HOST
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `cd openbrain-mcp && python -m pytest tests/test_oauth.py -v`
 Expected: `8 passed`
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 cd openbrain-mcp
 git add app/oauth.py tests/test_oauth.py
 git commit -m "feat(oauth): add PKCE-protected /authorize endpoint"
 ```
+
+**Done:** `cbb4226`. Code review of this task surfaced a design-level open-redirect/token-theft gap in `/register` (Task 3) — addressed via spec amendment `5df53b6` and fix `a504167` (see Task 3's Done line).
 
 ---
 
