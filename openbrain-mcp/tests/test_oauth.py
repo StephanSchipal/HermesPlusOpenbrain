@@ -1,9 +1,17 @@
 # tests/test_oauth.py
+import pytest
 from starlette.applications import Starlette
 from starlette.routing import Route
 from starlette.testclient import TestClient
 
 import app.oauth as oauth_module
+
+
+@pytest.fixture(autouse=True)
+def _clear_oauth_state():
+    oauth_module._clients.clear()
+    yield
+    oauth_module._clients.clear()
 
 
 def _oauth_test_app() -> Starlette:
@@ -15,6 +23,7 @@ def _oauth_test_app() -> Starlette:
               oauth_module.well_known_auth_server, methods=["GET"]),
         Route("/.well-known/oauth-protected-resource",
               oauth_module.well_known_protected_resource, methods=["GET"]),
+        Route("/register", oauth_module.register, methods=["POST"]),
     ])
 
 
@@ -45,3 +54,24 @@ def test_well_known_protected_resource_metadata_shape(monkeypatch):
     body = resp.json()
     assert body["resource"] == "https://brain.test.example/mcp"
     assert body["authorization_servers"] == ["https://brain.test.example"]
+
+
+def test_register_returns_client_id_for_valid_metadata(monkeypatch):
+    client = _client(monkeypatch)
+    resp = client.post("/register", json={
+        "redirect_uris": ["https://claude.ai/api/mcp/auth_callback"],
+    })
+    assert resp.status_code == 200
+    body = resp.json()
+    assert "client_id" in body and body["client_id"]
+    assert body["redirect_uris"] == ["https://claude.ai/api/mcp/auth_callback"]
+    assert body["token_endpoint_auth_method"] == "none"
+    # the registered client_id must actually be usable later
+    assert body["client_id"] in oauth_module._clients
+
+
+def test_register_rejects_missing_redirect_uris(monkeypatch):
+    client = _client(monkeypatch)
+    resp = client.post("/register", json={})
+    assert resp.status_code == 400
+    assert resp.json()["error"] == "invalid_client_metadata"
