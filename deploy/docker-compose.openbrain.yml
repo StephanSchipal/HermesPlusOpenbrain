@@ -37,6 +37,12 @@ services:
       - "traefik.http.routers.openbrain.entrypoints=websecure"
       - "traefik.http.routers.openbrain.tls.certresolver=letsencrypt"
       - "traefik.http.services.openbrain.loadbalancer.server.port=8080"
+      # Explicit low priority so it can never accidentally outrank the
+      # /authorize router below for a request that matches both (see that
+      # router's comment for why this matters -- Traefik compares priorities
+      # numerically regardless of whether they're explicit or automatic, so
+      # this MUST stay lower than openbrain-authorize's, not just "unset").
+      - "traefik.http.routers.openbrain.priority=1"
       # No Traefik network membership needed: Traefik runs with network_mode: host
       # and already reaches container bridge IPs directly (confirmed in Task 0.3).
       # /authorize is the one browser-facing OAuth step (see openbrain-mcp-oauth-
@@ -45,10 +51,20 @@ services:
       # definition needed). Everything else on this host (/mcp, /token,
       # /register, /.well-known/*) stays reachable without it -- those are
       # machine-to-machine calls from Claude's backend, never a browser.
+      #
+      # Explicit priority=100 (not just "higher than default"): Traefik's
+      # automatic priority for the plain openbrain router above equals that
+      # router's rule length in characters (commonly 35-45 for a real
+      # hostname) -- an earlier version of this label set priority=10 here,
+      # which is LOWER than that automatic value, so the plain Host()-only
+      # router silently won every /authorize request and this basic-auth
+      # gate was never actually hit. Both routers now set an explicit
+      # priority (100 vs. 1 above) so the outcome never depends on rule
+      # string length or Traefik's automatic/explicit tie-breaking rules.
       - "traefik.http.routers.openbrain-authorize.rule=Host(`${OPENBRAIN_HOST}`) && Path(`/authorize`)"
       - "traefik.http.routers.openbrain-authorize.entrypoints=websecure"
       - "traefik.http.routers.openbrain-authorize.tls.certresolver=letsencrypt"
-      - "traefik.http.routers.openbrain-authorize.priority=10"
+      - "traefik.http.routers.openbrain-authorize.priority=100"
       - "traefik.http.routers.openbrain-authorize.middlewares=openbrain-gui-auth"
       - "traefik.http.routers.openbrain-authorize.service=openbrain"
     healthcheck:
