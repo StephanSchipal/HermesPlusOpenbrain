@@ -1,13 +1,25 @@
 # app/oauth.py
+import base64
+import hashlib
 import secrets
 import time
+from urllib.parse import urlencode
 
 from starlette.requests import Request
-from starlette.responses import JSONResponse
+from starlette.responses import JSONResponse, RedirectResponse
 
 from app.config import OPENBRAIN_HOST
 
 _clients: dict[str, dict] = {}
+
+CODE_TTL_SECONDS = 60
+_auth_codes: dict[str, dict] = {}
+
+
+def _verify_pkce(code_verifier: str, code_challenge: str) -> bool:
+    digest = hashlib.sha256(code_verifier.encode()).digest()
+    computed = base64.urlsafe_b64encode(digest).rstrip(b"=").decode()
+    return secrets.compare_digest(computed, code_challenge)
 
 
 async def well_known_auth_server(_request: Request) -> JSONResponse:
@@ -53,3 +65,27 @@ async def register(request: Request) -> JSONResponse:
         "grant_types": ["authorization_code"],
         "response_types": ["code"],
     })
+
+
+async def authorize(request: Request):
+    q = request.query_params
+    client = _clients.get(q.get("client_id", ""))
+    redirect_uri = q.get("redirect_uri", "")
+    if not client or redirect_uri not in client["redirect_uris"]:
+        return JSONResponse({"error": "invalid_client"}, status_code=400)
+    if q.get("code_challenge_method") != "S256" or not q.get("code_challenge"):
+        return JSONResponse(
+            {"error": "invalid_request", "error_description": "PKCE S256 required"},
+            status_code=400,
+        )
+    code = secrets.token_urlsafe(24)
+    _auth_codes[code] = {
+        "client_id": q["client_id"],
+        "code_challenge": q["code_challenge"],
+        "redirect_uri": redirect_uri,
+        "expires_at": time.time() + CODE_TTL_SECONDS,
+    }
+    params = {"code": code}
+    if q.get("state") is not None:
+        params["state"] = q["state"]
+    return RedirectResponse(f"{redirect_uri}?{urlencode(params)}", status_code=302)
