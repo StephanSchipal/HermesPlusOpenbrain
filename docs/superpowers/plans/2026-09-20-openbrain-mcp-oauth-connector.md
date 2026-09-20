@@ -29,7 +29,7 @@
 **Files:**
 - Modify: `openbrain-mcp/app/config.py`
 
-- [ ] **Step 1: Add the new setting**
+- [x] **Step 1: Add the new setting**
 
 In `openbrain-mcp/app/config.py`, add this line after `OPENBRAIN_TOKEN` (no test needed — this file has no existing tests; it's a plain `os.environ.get` read, exactly like every other line in it):
 
@@ -38,13 +38,15 @@ OPENBRAIN_TOKEN = os.environ.get("OPENBRAIN_TOKEN", "")
 OPENBRAIN_HOST = os.environ.get("OPENBRAIN_HOST", "")
 ```
 
-- [ ] **Step 2: Commit**
+- [x] **Step 2: Commit**
 
 ```bash
 cd openbrain-mcp
 git add app/config.py
 git commit -m "feat(oauth): add OPENBRAIN_HOST config setting"
 ```
+
+**Done:** `fb7e7d2`
 
 ---
 
@@ -54,7 +56,7 @@ git commit -m "feat(oauth): add OPENBRAIN_HOST config setting"
 - Create: `openbrain-mcp/app/oauth.py`
 - Create: `openbrain-mcp/tests/test_oauth.py`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Create `openbrain-mcp/tests/test_oauth.py`:
 
@@ -108,12 +110,12 @@ def test_well_known_protected_resource_metadata_shape(monkeypatch):
     assert body["authorization_servers"] == ["https://brain.test.example"]
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `cd openbrain-mcp && python -m pytest tests/test_oauth.py -v`
 Expected: `ModuleNotFoundError: No module named 'app.oauth'` (or collection error) — the module doesn't exist yet.
 
-- [ ] **Step 3: Create `app/oauth.py` with the two metadata handlers**
+- [x] **Step 3: Create `app/oauth.py` with the two metadata handlers**
 
 ```python
 # app/oauth.py
@@ -143,18 +145,20 @@ async def well_known_protected_resource(_request: Request) -> JSONResponse:
     })
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `cd openbrain-mcp && python -m pytest tests/test_oauth.py -v`
 Expected: `2 passed`
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 cd openbrain-mcp
 git add app/oauth.py tests/test_oauth.py
 git commit -m "feat(oauth): add OAuth metadata well-known endpoints"
 ```
+
+**Done:** `3814a45`
 
 ---
 
