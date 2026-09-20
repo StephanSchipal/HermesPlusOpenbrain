@@ -225,6 +225,7 @@ def test_full_authorize_token_flow_with_valid_pkce(monkeypatch):
         "code": code,
         "client_id": client_id,
         "code_verifier": verifier,
+        "redirect_uri": REDIRECT_URI,
     })
 
     assert resp.status_code == 200
@@ -248,6 +249,7 @@ def test_token_rejects_expired_code(monkeypatch):
         "code": code,
         "client_id": client_id,
         "code_verifier": verifier,
+        "redirect_uri": REDIRECT_URI,
     })
 
     assert resp.status_code == 400
@@ -265,6 +267,7 @@ def test_token_rejects_replayed_code(monkeypatch):
         "code": code,
         "client_id": client_id,
         "code_verifier": verifier,
+        "redirect_uri": REDIRECT_URI,
     }
 
     first = client.post("/token", data=token_request)
@@ -287,6 +290,7 @@ def test_token_rejects_wrong_code_verifier(monkeypatch):
         "code": code,
         "client_id": client_id,
         "code_verifier": "wrong-verifier",
+        "redirect_uri": REDIRECT_URI,
     })
 
     assert resp.status_code == 400
@@ -306,6 +310,108 @@ def test_token_rejects_client_id_mismatch(monkeypatch):
         "code": code,
         "client_id": other_client_id,
         "code_verifier": verifier,
+        "redirect_uri": REDIRECT_URI,
+    })
+
+    assert resp.status_code == 400
+    assert resp.json()["error"] == "invalid_grant"
+
+
+def test_token_rejects_malformed_multipart_body(monkeypatch):
+    client = _client(monkeypatch)
+    # Content-Type declares boundary "AAA" but the body actually uses "BBB" -
+    # a mismatched/bad boundary that the multipart parser cannot parse.
+    body = (
+        b"--BBB\r\n"
+        b'Content-Disposition: form-data; name="code"\r\n\r\n'
+        b"abc123\r\n"
+        b"--BBB--\r\n"
+    )
+    resp = client.post(
+        "/token",
+        content=body,
+        headers={"content-type": "multipart/form-data; boundary=AAA"},
+    )
+    assert resp.status_code == 400
+    assert resp.json()["error"] == "invalid_grant"
+
+
+def test_token_rejects_code_verifier_as_file_without_consuming_code(monkeypatch):
+    monkeypatch.setattr(oauth_module, "OPENBRAIN_TOKEN", "the-real-secret-token")
+    client = _client(monkeypatch)
+    client_id = _register_client(client, REDIRECT_URI)
+    verifier, challenge = _pkce_pair()
+    code = _get_auth_code(client, client_id, (verifier, challenge))
+
+    # code_verifier submitted as a file upload, not a plain text field -
+    # form.get("code_verifier") would return an UploadFile, not a string.
+    malformed = client.post(
+        "/token",
+        data={
+            "grant_type": "authorization_code",
+            "code": code,
+            "client_id": client_id,
+            "redirect_uri": REDIRECT_URI,
+        },
+        files={"code_verifier": ("f.txt", b"some-bytes")},
+    )
+    assert malformed.status_code == 400
+    assert malformed.json()["error"] == "invalid_grant"
+
+    # The malformed request must NOT have consumed the code: a second,
+    # well-formed request reusing the same code must still succeed.
+    resp = client.post("/token", data={
+        "grant_type": "authorization_code",
+        "code": code,
+        "client_id": client_id,
+        "code_verifier": verifier,
+        "redirect_uri": REDIRECT_URI,
+    })
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["access_token"] == "the-real-secret-token"
+    assert body["token_type"] == "Bearer"
+
+
+def test_token_rejects_missing_or_wrong_grant_type(monkeypatch):
+    client = _client(monkeypatch)
+    client_id = _register_client(client, REDIRECT_URI)
+    verifier, challenge = _pkce_pair()
+
+    code_missing = _get_auth_code(client, client_id, (verifier, challenge))
+    resp_missing = client.post("/token", data={
+        "code": code_missing,
+        "client_id": client_id,
+        "code_verifier": verifier,
+        "redirect_uri": REDIRECT_URI,
+    })
+    assert resp_missing.status_code == 400
+    assert resp_missing.json()["error"] == "invalid_grant"
+
+    code_wrong = _get_auth_code(client, client_id, (verifier, challenge))
+    resp_wrong = client.post("/token", data={
+        "grant_type": "client_credentials",
+        "code": code_wrong,
+        "client_id": client_id,
+        "code_verifier": verifier,
+        "redirect_uri": REDIRECT_URI,
+    })
+    assert resp_wrong.status_code == 400
+    assert resp_wrong.json()["error"] == "invalid_grant"
+
+
+def test_token_rejects_mismatched_redirect_uri(monkeypatch):
+    client = _client(monkeypatch)
+    client_id = _register_client(client, REDIRECT_URI)
+    verifier, challenge = _pkce_pair()
+    code = _get_auth_code(client, client_id, (verifier, challenge))
+
+    resp = client.post("/token", data={
+        "grant_type": "authorization_code",
+        "code": code,
+        "client_id": client_id,
+        "code_verifier": verifier,
+        "redirect_uri": "https://claude.ai/api/mcp/auth_callback_wrong",
     })
 
     assert resp.status_code == 400

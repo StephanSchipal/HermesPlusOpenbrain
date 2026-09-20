@@ -101,15 +101,33 @@ async def authorize(request: Request):
 
 
 async def token(request: Request) -> JSONResponse:
-    form = await request.form()
-    code = form.get("code", "")
+    try:
+        form = await request.form()
+    except Exception:
+        return JSONResponse({"error": "invalid_grant"}, status_code=400)
+
+    code = form.get("code")
+    client_id = form.get("client_id")
+    code_verifier = form.get("code_verifier")
+    grant_type = form.get("grant_type")
+    redirect_uri = form.get("redirect_uri")
+
+    # Reject anything that isn't a plain string (e.g. an UploadFile from a
+    # multipart file field) *before* touching _auth_codes, so a malformed
+    # request can never pop and destroy a real, still-valid code.
+    if not isinstance(code, str) or not isinstance(client_id, str) or not isinstance(code_verifier, str):
+        return JSONResponse({"error": "invalid_grant"}, status_code=400)
+    if grant_type != "authorization_code":
+        return JSONResponse({"error": "invalid_grant"}, status_code=400)
+
     entry = _auth_codes.pop(code, None)   # pop, not get: makes the code single-use
     if not entry or entry["expires_at"] < time.time():
         return JSONResponse({"error": "invalid_grant"}, status_code=400)
-    if entry["client_id"] != form.get("client_id"):
+    if entry["client_id"] != client_id:
         return JSONResponse({"error": "invalid_grant"}, status_code=400)
-    verifier = form.get("code_verifier", "")
-    if not _verify_pkce(verifier, entry["code_challenge"]):
+    if entry["redirect_uri"] != redirect_uri:
+        return JSONResponse({"error": "invalid_grant"}, status_code=400)
+    if not _verify_pkce(code_verifier, entry["code_challenge"]):
         return JSONResponse({"error": "invalid_grant"}, status_code=400)
     return JSONResponse({
         "access_token": OPENBRAIN_TOKEN,
