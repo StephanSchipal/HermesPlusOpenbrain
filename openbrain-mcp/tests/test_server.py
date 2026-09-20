@@ -33,3 +33,27 @@ def test_mcp_accepts_non_localhost_host_headers(monkeypatch):
                 "Host": host,
             })
             assert resp.status_code != 421, f"Host header {host!r} was rejected by DNS-rebinding check"
+
+def test_well_known_endpoints_exempt_from_bearer_auth(monkeypatch):
+    client = _client(monkeypatch)
+    resp = client.get("/.well-known/oauth-authorization-server")
+    assert resp.status_code == 200
+    resp = client.get("/.well-known/oauth-protected-resource")
+    assert resp.status_code == 200
+
+
+def test_register_exempt_from_bearer_auth(monkeypatch):
+    client = _client(monkeypatch)
+    resp = client.post("/register", json={"redirect_uris": ["https://claude.ai/api/mcp/auth_callback"]})
+    assert resp.status_code == 200
+
+
+def test_mcp_401_includes_www_authenticate_header(monkeypatch):
+    client = _client(monkeypatch)
+    monkeypatch.setattr(server_module, "OPENBRAIN_HOST", "brain.test.example")
+    resp = client.get("/mcp")
+    assert resp.status_code == 401
+    assert resp.headers["www-authenticate"] == (
+        'Bearer resource_metadata='
+        '"https://brain.test.example/.well-known/oauth-protected-resource"'
+    )

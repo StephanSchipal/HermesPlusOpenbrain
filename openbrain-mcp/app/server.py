@@ -6,10 +6,17 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.routing import Route
 
-from app.config import OPENBRAIN_TOKEN
+from app.config import OPENBRAIN_HOST, OPENBRAIN_TOKEN
 from app.db import get_conn
 from app import store
 from app.fingerprint import content_fingerprint_debug
+from app.oauth import (
+    authorize,
+    register,
+    token,
+    well_known_auth_server,
+    well_known_protected_resource,
+)
 
 # host="0.0.0.0" (not the FastMCP default "127.0.0.1") disables the MCP SDK's
 # DNS-rebinding host-header check, which otherwise 421s any request whose Host
@@ -150,12 +157,30 @@ def list_keywords() -> list[dict]:
         return store.list_keywords(conn)
 
 class BearerAuthMiddleware(BaseHTTPMiddleware):
+    # /authorize needs no bearer token -- it's gated one layer further out,
+    # by Traefik basic-auth on that path (see deploy/docker-compose.openbrain.yml).
+    # The rest are pre-auth OAuth endpoints a client hasn't obtained a token
+    # from yet, plus the pre-existing /health exemption.
+    EXEMPT_PATHS = {
+        "/health",
+        "/.well-known/oauth-authorization-server",
+        "/.well-known/oauth-protected-resource",
+        "/register",
+        "/authorize",
+        "/token",
+    }
+
     async def dispatch(self, request: Request, call_next):
-        if request.url.path == "/health":
+        if request.url.path in self.EXEMPT_PATHS:
             return await call_next(request)
         expected = f"Bearer {OPENBRAIN_TOKEN}"
         if not OPENBRAIN_TOKEN or request.headers.get("authorization") != expected:
-            return JSONResponse({"error": "unauthorized"}, status_code=401)
+            resource_meta = f"https://{OPENBRAIN_HOST}/.well-known/oauth-protected-resource"
+            return JSONResponse(
+                {"error": "unauthorized"},
+                status_code=401,
+                headers={"WWW-Authenticate": f'Bearer resource_metadata="{resource_meta}"'},
+            )
         return await call_next(request)
 
 async def _health(_request: Request) -> JSONResponse:
@@ -164,6 +189,13 @@ async def _health(_request: Request) -> JSONResponse:
 def build_app() -> Starlette:
     app = mcp.streamable_http_app()           # Starlette app serving MCP at /mcp
     app.router.routes.append(Route("/health", _health, methods=["GET"]))
+    app.router.routes.append(Route(
+        "/.well-known/oauth-authorization-server", well_known_auth_server, methods=["GET"]))
+    app.router.routes.append(Route(
+        "/.well-known/oauth-protected-resource", well_known_protected_resource, methods=["GET"]))
+    app.router.routes.append(Route("/register", register, methods=["POST"]))
+    app.router.routes.append(Route("/authorize", authorize, methods=["GET"]))
+    app.router.routes.append(Route("/token", token, methods=["POST"]))
     app.add_middleware(BearerAuthMiddleware)
     return app
 
