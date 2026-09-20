@@ -304,17 +304,19 @@ environment variable referenced as `${AUTH_HEADER}` inside a space-free header a
 BOM that Desktop's JSON parser rejects) also had to be fixed by writing the config file with
 `[System.IO.File]::WriteAllText(...)` instead. Full writeup in the plan's Task 6.1 resolution note.
 
-**claude.ai personal connector (web + mobile), implemented 2026-09-20, pending deploy verification.**
-Unlike Claude Code/Desktop,
+**claude.ai personal connector (web + mobile), done (2026-09-20).** Unlike Claude Code/Desktop,
 claude.ai's personal "Add custom connector" dialog has no field for a raw bearer token — only a
 Server URL and optional OAuth Client ID/Secret. `openbrain-mcp` now also runs a minimal OAuth 2.0
 authorization server (RFC 7591 Dynamic Client Registration + PKCE) alongside its existing bearer-
 token check, so claude.ai can self-register and authenticate automatically: paste
 `https://<OPENBRAIN_HOST>/mcp` into the connector dialog, leave Client ID/Secret blank. The one
-browser-facing step (`/authorize`) is gated by the same Traefik basic-auth already protecting
-`openbrain-gui`. The OAuth flow's `/token` endpoint hands back the existing `OPENBRAIN_TOKEN`
-itself as the access token — it's a login wrapper around the same secret every other client uses,
-not a parallel credential system. Design/implementation details:
+browser-facing step (`/authorize`) is gated by its own Traefik basic-auth router, using the same
+credentials as `openbrain-gui`. The OAuth flow's `/token` endpoint hands back the existing
+`OPENBRAIN_TOKEN` itself as the access token — it's a login wrapper around the same secret every
+other client uses, not a parallel credential system. Deployed and verified on the VPS: health,
+both `.well-known` metadata endpoints, `/mcp`'s unchanged bearer requirement (including a real
+authenticated MCP handshake), and `/authorize`'s Traefik basic-auth gate all confirmed working.
+Design/implementation details:
 [`docs/superpowers/specs/2026-09-20-openbrain-mcp-oauth-connector-design.md`](docs/superpowers/specs/2026-09-20-openbrain-mcp-oauth-connector-design.md).
 
 ## Using it

@@ -345,8 +345,8 @@ labels:
   - "traefik.http.routers.openbrain.tls.certresolver=letsencrypt"
   - "traefik.http.services.openbrain.loadbalancer.server.port=8080"
   - "traefik.http.routers.openbrain.priority=1"
-  # Gate only the human-facing /authorize step with the same basic-auth
-  # already protecting the GUI. Everything else on this host (/mcp, /token,
+  # Gate only the human-facing /authorize step with basic-auth, using the
+  # same credentials as the GUI. Everything else on this host (/mcp, /token,
   # /register, /.well-known/*) stays reachable without it -- those are
   # machine-to-machine calls from Claude's backend, never a browser.
   - "traefik.http.routers.openbrain-authorize.rule=Host(`${OPENBRAIN_HOST}`) && Path(`/authorize`)"
