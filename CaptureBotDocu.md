@@ -9,7 +9,8 @@ documents VPS-side infrastructure on the Hermes-Agent host — nothing here is
 deployed or owned by this repo's `deploy/`.
 
 - **VPS:** `srv1608402.hstgr.cloud`, container `hermes-agent-7qpk-hermes-agent-1`
-  (`ghcr.io/hostinger/hvps-hermes-agent:latest`, Hermes v0.20.5, s6-overlay).
+  (`ghcr.io/hostinger/hvps-hermes-agent:latest`, Hermes v0.21.5 since
+  2026-09-29, s6-overlay).
 - **`$HERMES_HOME`:** `/opt/data` (the persistent bind mount
   `/docker/hermes-agent-7qpk/data`).
 
@@ -38,45 +39,91 @@ new QR.
 
 | Profile | Path | Owns | api_server port |
 |---|---|---|---|
-| `default` | `/opt/data` | Twilio voice, CLI, `laptop_fs` MCP, `openbrain` MCP (laptop/desktop/CLI recall), all skills, `voice-server-watchdog` cron. **No WhatsApp.** | 8642 |
-| `master` | `/opt/data/profiles/master` | Future orchestrator/coordinator for specialist bots (none defined yet). Idle clone. | 8643 |
-| `openbrain` | `/opt/data/profiles/openbrain` | **WhatsApp** (capture + recall + general chat), `openbrain` MCP only, all cloned skills, `weekly-whatsapp-session-reset-reminder` cron. | 8644 |
+| `default` | `/opt/data` | Twilio voice, CLI, `laptop_fs` MCP, `openbrain` MCP (laptop/desktop/CLI recall), all skills, `voice-server-watchdog` cron. **No WhatsApp.** Its gateway is the host **multiplexer** (see below). | 8642 |
+| `master` | `/opt/data/profiles/master` | Future orchestrator/coordinator for specialist bots (none defined yet). Idle clone. Served by the multiplexer. | `8642/p/master/v1` |
+| `openbrain` | `/opt/data/profiles/openbrain` | **WhatsApp** (capture + recall + general chat), `openbrain` MCP only, all cloned skills, `weekly-whatsapp-session-reset-reminder` cron. **Standalone** gateway. | 8644 |
 
 All three: `anthropic/claude-sonnet-5`, `cache_ttl: 1h`, `compression.threshold: 0.2`.
+The specialist profiles added later (`coder`, `designer`, `researcher`, `writer`)
+are served by the multiplexer like `master`.
 
-## How multi-profile gateways are supervised (Hostinger image internals)
+## How multi-profile gateways are supervised (since v0.21, 2026-09-29)
 
-The image is built for this. On every container boot,
-`/etc/cont-init.d/02-reconcile-profiles` runs `python -m hermes_cli.container_boot`,
-which:
+Hermes v0.21 switched containers to **one gateway per host**. On every container
+boot, `/etc/cont-init.d/02-reconcile-profiles` (`python -m hermes_cli.container_boot`):
 
 1. walks `$HERMES_HOME/profiles/*` (plus the root `default`),
 2. recreates each profile's s6 service slot at `/run/service/gateway-<name>`
-   (tmpfs — wiped every restart),
-3. auto-starts the gateway **iff** the profile's
-   `gateway_state.json` `desired_state` is `running` — separate-mode only
-   (`GATEWAY_MULTIPLEX_PROFILES` env unset; if it were set, only the default
-   gateway would run and it would multiplex all profiles).
+   (tmpfs, so it is wiped on every restart),
+3. starts **only** the root slot `gateway-default`. It "inherits" the run
+   intent of every named profile and **multiplexes** them all. Named slots are
+   registered but always left **down**. `gateway.multiplex_profiles: false` is
+   retired and no longer works as an opt-out.
 
-So `openbrain`'s gateway survives `docker compose up --force-recreate` and
-Hermes image updates with **no watchdog cron** — verified 2026-08-28 across two
-recreates. `gateway_state.json` and the profile dir live on the persistent
-volume; only the s6 slot is ephemeral and regenerated.
+Under the multiplexer the named profiles' `api_server`s move to
+`http://127.0.0.1:8642/p/<profile>/v1`. Nothing of ours used their old ports.
+
+### Why `openbrain` is standalone
+
+The multiplexer serves WhatsApp **only on the `default` profile**. Its log line is:
+`whatsapp is enabled in profile(s) openbrain but not on the default profile — the
+platform is not being served`. Upstream lists "WhatsApp bridge/relay on
+secondaries" as an open multiplexing gap. So `openbrain` opts out:
+
+```yaml
+# /opt/data/profiles/openbrain/config.yaml
+gateway:
+  standalone: true
+```
+
+The multiplexer then skips `openbrain`, and `openbrain` runs its own
+`hermes -p openbrain gateway run` (own WhatsApp bridge, own cron, `api_server`
+on 8644). `hermes config set` warns that `gateway.standalone` is "not a
+recognized config key". Ignore that, because the gateway does read it.
+
+**Nothing in the image starts a standalone slot on boot.**
+`hermes -p openbrain gateway start` does not survive a container restart either
+(verified). So a **host** cron job brings the slot up:
+
+```
+* * * * * /root/HermesPlusOpenbrain/scripts/hermes-standalone-gateways-watchdog.sh
+```
+
+It only acts on profiles that really have `standalone: true`, so it never starts
+a second gateway for a multiplexed profile. It logs to
+`/var/log/hermes-standalone-gateways-watchdog.log`. After a recreate or restart,
+`openbrain` is back within about 1 minute (a line `openbrain: gateway slot was
+down — started`).
+
+`gateway.standalone` is marked upstream as a **temporary compatibility shim**.
+On every future Hermes update, check whether WhatsApp on secondary profiles
+works under the multiplexer. If it does, fold `openbrain` back with
+`hermes gateway migrate --multiplex`, remove `standalone`, and drop the cron line.
+Full background: [`docs/hermes-update-v0.21.5.md`](docs/hermes-update-v0.21.5.md).
 
 ### Operational gotchas
 
-- **`hermes -p <profile> gateway start` is a no-op on this image** (it targets a
-  systemd/launchd service that doesn't exist here). To act on a gateway live:
+- **To act on a gateway live, use s6 directly.** `hermes -p <profile> gateway start`
+  does not persist across restarts here.
   - up: `docker exec <C> bash -lc 'rm -f /run/service/gateway-<name>/down; /command/s6-svc -u /run/service/gateway-<name>'`
   - restart: `/command/s6-svc -r /run/service/gateway-<name>`
-  - down: `/command/s6-svc -d /run/service/gateway-<name>`
-- **Each profile's gateway binds its own `api_server` port.** A cloned profile
-  inherits nothing here and defaults to 8642, colliding with `default` →
-  `startup_failed: api_server_port_in_use`. Fix:
+  - down: `/command/s6-svc -d /run/service/gateway-<name>` (for `openbrain`, the
+    watchdog brings it back up within a minute. Comment out its cron line first
+    if you need it to stay down.)
+  - The `<name>` is `default` (the multiplexer, so this affects every profile
+    except `openbrain`) or `openbrain`. **Never** start another named slot by
+    hand: a second gateway would fight the multiplexer over that profile.
+- **Only standalone gateways bind their own `api_server` port.** If another
+  profile is ever made standalone, give it a free port or it collides with 8642
+  (`startup_failed: api_server_port_in_use`):
   `hermes -p <name> config set platforms.api_server.extra.port <free port> --force`.
-- **WhatsApp on/off is the `.env` var `WHATSAPP_ENABLED`** (`true`/`false`) in
-  the profile's `.env`. `gateway.whatsapp.enabled` is **not** a real config key
-  (Hermes warns and ignores it).
+- **WhatsApp on/off:** the `.env` var `WHATSAPP_ENABLED` (`true`/`false`) in the
+  profile's `.env`, **but** since v0.21 an explicit disable in `config.yaml` wins
+  over the env var. `openbrain`'s config had a leftover
+  `gateway.whatsapp.enabled: false`, which v0.20.x ignored and v0.21 treats as
+  "off". It was removed on 2026-09-29. `master`'s config still carries the same
+  leftover, which is harmless because its WhatsApp is off anyway. If WhatsApp
+  silently stays down, grep the profile's `config.yaml` for `whatsapp:`.
 - **The Twilio voice server does not auto-start after a container recreate.**
   Kick it: `docker exec <C> bash /opt/data/scripts/voice_watchdog.sh` (the
   `voice-server-watchdog` cron does it within 5 min otherwise). Also re-check the
@@ -129,13 +176,23 @@ $ hermes -p openbrain mcp list
 - `openbrain` gateway + WhatsApp pairing + user approval all survived
   `docker compose up --force-recreate`.
 
+**Re-verified 2026-09-29 after the v0.21.5 update** (multiplexer + standalone
+`openbrain`): WhatsApp save, Buzz mentions (`@Hermes`, `@Hermes-openbrain`), a
+Twilio test call, and the GUI Cost page were all confirmed working by Stephan.
+On the server side, the WhatsApp bridge reported `connected`, all 7 profiles
+were `running`, and the MCPs `openbrain`, `stripe` and `laptop_fs` were
+connected.
+
 ## Reversing it
 
 1. On the phone: unlink the `openbrain` WhatsApp device.
 2. `openbrain` `.env`: `WHATSAPP_ENABLED=false`; `default` `.env`:
    `WHATSAPP_ENABLED=true`.
 3. `hermes -p default whatsapp` (TTY) → re-pair `default`.
-4. `/command/s6-svc -r` both gateways.
+4. Remove `gateway.standalone` from `openbrain`'s config, then remove the
+   `hermes-standalone-gateways-watchdog.sh` line from the host crontab.
+   `/command/s6-svc -d` `gateway-openbrain`, then `-r` `gateway-default`.
+   From then on the multiplexer serves `openbrain` too.
 5. Move the cron back; `hermes profile delete openbrain`.
 
 Captures are never at risk — they live in `openbrain-db`, untouched throughout.
@@ -151,12 +208,9 @@ scan the QR, then `/command/s6-svc -r /run/service/gateway-openbrain`.
   self-manages). The clone carries all 129.
 - **Swap the model** on `openbrain` to something cheaper — user's call, one
   `hermes -p openbrain config set model.default …`.
-- **Profile-aware cost visibility.** The GUI Cost page and `hermes insights`
-  read one profile's `state.db`; WhatsApp usage now lives in
-  `/opt/data/profiles/openbrain/state.db`. Interim: `openbrain insights`. The
-  rework is code-only — named-profile `state.db` files are already inside the
-  Cost page's existing `/hermes-data` bind mount
-  (`/hermes-data/profiles/*/state.db`).
+- ~~**Profile-aware cost visibility.**~~ Done 2026-08-29: the GUI Cost page has
+  a per-bot profile dropdown plus an "All" view (see `costpage.md`,
+  "Per-bot view").
 - **The `master` orchestrator** and other specialist bots (Designer, Writer,
   Builder, Researcher) — a separate effort.
 
