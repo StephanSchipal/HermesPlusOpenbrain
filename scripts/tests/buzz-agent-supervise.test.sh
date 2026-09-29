@@ -67,4 +67,19 @@ run; sleep 1
 [ "$(grep -c 'profile=alpha' "$SUP_STARTED")" -ge 2 ] || { echo "FAIL: alpha not relaunched"; exit 1; }
 [ "$(grep -c 'profile=bravo' "$SUP_STARTED")" = 1 ] || { echo "FAIL: bravo restarted unnecessarily"; exit 1; }
 
+# stale pid file after a container restart: PIDs are handed out again from low
+# numbers, so bravo.pid can end up naming a *live, unrelated* process (another
+# agent's buzz-acp, or a thread of a gateway). That must not count as "bravo is
+# running". Only asserted where /proc is available.
+if [ -d /proc/self ]; then
+  bravo_pid=$(cat "$TMP/agents/bravo.pid")
+  alpha_pid=$(cat "$TMP/agents/alpha.pid")
+  echo "$alpha_pid" > "$TMP/agents/bravo.pid"   # bravo.pid now points at alpha
+  kill "$bravo_pid" 2>/dev/null || true
+  sleep 1
+  run; sleep 1
+  [ "$(grep -c 'profile=bravo' "$SUP_STARTED")" = 2 ] || { echo "FAIL: bravo not relaunched when its pid file named another agent's process"; exit 1; }
+  [ "$(grep -c 'profile=alpha' "$SUP_STARTED")" = 2 ] || { echo "FAIL: alpha restarted unnecessarily"; exit 1; }
+fi
+
 echo "PASS"

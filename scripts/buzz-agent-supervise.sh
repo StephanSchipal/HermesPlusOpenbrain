@@ -39,10 +39,24 @@ install_wrapper() {
   fi
 }
 
+# Is the process in <name>.pid really <name>'s buzz-acp? `kill -0` alone is not
+# enough: after a container restart PIDs are handed out again from low numbers,
+# so a stale pid file can name a live, unrelated process (another agent's
+# buzz-acp, or a thread of a gateway) and the agent would never be relaunched.
+# Where /proc is available, require our BUZZ_AGENT_PROFILE marker in its environ.
+is_running() {
+  name=$1
+  pid=$(cat "$BUZZ_AGENT_DIR/$name.pid" 2>/dev/null) || return 1
+  case "$pid" in ''|*[!0-9]*) return 1 ;; esac
+  kill -0 "$pid" 2>/dev/null || return 1
+  [ -d /proc/self ] || return 0
+  tr '\0' '\n' < "/proc/$pid/environ" 2>/dev/null | grep -qx "BUZZ_AGENT_PROFILE=$name"
+}
+
 start_one() {
   name=$1
   pidf="$BUZZ_AGENT_DIR/$name.pid"
-  if [ -f "$pidf" ] && kill -0 "$(cat "$pidf" 2>/dev/null)" 2>/dev/null; then
+  if is_running "$name"; then
     return 0
   fi
   if [ ! -f "$BUZZ_AGENT_DIR/$name.env" ]; then
