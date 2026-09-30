@@ -43,7 +43,10 @@ new QR.
 | `master` | `/opt/data/profiles/master` | Future orchestrator/coordinator for specialist bots (none defined yet). Idle clone. Served by the multiplexer. | `8642/p/master/v1` |
 | `openbrain` | `/opt/data/profiles/openbrain` | **WhatsApp** (capture + recall + general chat), `openbrain` MCP only, all cloned skills, `weekly-whatsapp-session-reset-reminder` cron. **Standalone** gateway. | 8644 |
 
-All three: `anthropic/claude-sonnet-5`, `cache_ttl: 1h`, `compression.threshold: 0.2`.
+All three: `anthropic/claude-sonnet-5-5` (all 7 profiles switched from
+`claude-sonnet-5` on 2026-09-30, same $2/$10 pricing; Hermes v0.21.5 has no
+built-in entry and resolves pricing via models.dev), `cache_ttl: 1h`,
+`compression.threshold: 0.2`.
 The specialist profiles added later (`coder`, `designer`, `researcher`, `writer`)
 are served by the multiplexer like `master`.
 
